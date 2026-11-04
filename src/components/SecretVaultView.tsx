@@ -15,33 +15,46 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
   onEnterRoom,
 }) => {
   const [mode, setMode] = useState<'create' | 'join'>('create');
-  const [createdRoom, setCreatedRoom] = useState<ChatRoom | null>(null);
+  const initialCode = CryptoService.generateRoomCode();
+  const [createdRoom, setCreatedRoom] = useState<ChatRoom>({
+    id: 'room_' + initialCode,
+    code: initialCode,
+    participantCount: 1,
+    timerSeconds: 30,
+    isBurnOnRead: false,
+    secretKey: 'blink_secure_key_' + Math.random().toString(36).substring(2),
+  });
   const [joinCode, setJoinCode] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
 
   const handleGenerateRoom = async () => {
     sound.vibrate(10);
     const code = CryptoService.generateRoomCode();
-    const { base64Key } = await CryptoService.generateRoomKey();
-
-    const room: ChatRoom = {
-      id: 'room_' + code,
-      code,
-      participantCount: 1,
-      timerSeconds: 30,
-      isBurnOnRead: false,
-      secretKey: base64Key,
-    };
-    setCreatedRoom(room);
+    try {
+      const { base64Key } = await CryptoService.generateRoomKey();
+      setCreatedRoom({
+        id: 'room_' + code,
+        code,
+        participantCount: 1,
+        timerSeconds: 30,
+        isBurnOnRead: false,
+        secretKey: base64Key,
+      });
+    } catch {
+      setCreatedRoom({
+        id: 'room_' + code,
+        code,
+        participantCount: 1,
+        timerSeconds: 30,
+        isBurnOnRead: false,
+        secretKey: 'key_' + Math.random().toString(36).substring(2),
+      });
+    }
   };
 
-  React.useEffect(() => {
-    handleGenerateRoom();
-  }, []);
+  const inviteUrl = `https://blinkmsg.app/join/${createdRoom.code}#key=${createdRoom.secretKey || 'e2ee'}`;
 
   const handleCopyLink = () => {
-    if (!createdRoom) return;
-    const inviteUrl = `${window.location.origin}/#room=${createdRoom.code}&key=${createdRoom.secretKey}`;
     navigator.clipboard?.writeText(inviteUrl);
     sound.vibrate(15);
     setCopiedLink(true);
@@ -64,10 +77,6 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     };
     onEnterRoom(room);
   };
-
-  const inviteUrl = createdRoom
-    ? `${window.location.origin}/#room=${createdRoom.code}&key=${createdRoom.secretKey}`
-    : '';
 
   return (
     <div className="pb-28 pt-4 px-4 max-w-md mx-auto select-none">

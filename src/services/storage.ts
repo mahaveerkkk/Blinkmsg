@@ -18,6 +18,21 @@ const VIBE_TAGS = [
 
 export class StorageService {
   /**
+   * Retrieves profile without generating random one
+   */
+  static getProfile(): UserProfile | null {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  }
+
+  /**
    * Generates or loads the local anonymous ghost identity
    */
   static getOrCreateProfile(): UserProfile {

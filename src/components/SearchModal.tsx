@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Search, X, Lock, ArrowRight } from 'lucide-react';
 import { UserProfile } from '../types';
 import { Avatar } from './Avatar';
-import { MOCK_RADAR_USERS } from '../services/network';
+import { MOCK_RADAR_USERS, supabase } from '../services/network';
 import { sound } from '../services/sound';
 
 interface SearchModalProps {
@@ -20,10 +20,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSearch = (text: string) => {
+  const handleSearch = async (text: string) => {
     setQuery(text);
     const clean = text.trim().toLowerCase().replace('@', '');
 
@@ -32,12 +33,47 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       return;
     }
 
+    setLoading(true);
+
+    // 1. Live Supabase Query
+    if (supabase) {
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('handle', `%${clean}%`)
+          .limit(10);
+
+        if (data && data.length > 0) {
+          const mapped: UserProfile[] = data.map((d: any) => ({
+            id: d.id,
+            handle: d.handle,
+            displayName: d.display_name || d.handle,
+            avatarId: d.avatar_id || 1,
+            vibe: d.vibe || '',
+            isAvailable: d.is_available || false,
+            country: d.country || 'India',
+            state: 'Delhi',
+            city: d.city || 'New Delhi',
+            lastActive: Date.now(),
+          }));
+          setSearchResults(mapped);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // fallback
+      }
+    }
+
+    // 2. Fallback
     const found = MOCK_RADAR_USERS.filter(
       (u) =>
         u.handle.toLowerCase().includes(clean) ||
         u.displayName.toLowerCase().includes(clean)
     );
     setSearchResults(found);
+    setLoading(false);
   };
 
   return (

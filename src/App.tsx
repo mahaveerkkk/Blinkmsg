@@ -9,13 +9,15 @@ import { SecretVaultView } from './components/SecretVaultView';
 import { ChatsListView } from './components/ChatsListView';
 import { ChatView } from './components/ChatView';
 import { SearchModal } from './components/SearchModal';
-import { ProfileModal } from './components/ProfileModal';
+import { ProfileView } from './components/ProfileView';
 import { PanicModal } from './components/PanicModal';
+import { SplashScreen } from './components/SplashScreen';
 
 export const App: React.FC = () => {
-  const [currentUser, setCurrentUser] = useState<UserProfile>(() =>
-    StorageService.getOrCreateProfile()
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() =>
+    StorageService.getProfile()
   );
+  const [showSplash, setShowSplash] = useState<boolean>(!StorageService.getProfile());
   const [activeTab, setActiveTab] = useState<ActiveTab>('chats');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
   const [activeRoomsList, setActiveRoomsList] = useState<ChatRoom[]>([]);
@@ -23,7 +25,6 @@ export const App: React.FC = () => {
 
   // Modals
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isPanicOpen, setIsPanicOpen] = useState(false);
 
   useEffect(() => {
@@ -51,6 +52,7 @@ export const App: React.FC = () => {
   }, []);
 
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
+    if (!currentUser) return;
     const next = { ...currentUser, ...updated };
     setCurrentUser(next);
     StorageService.saveProfile(next);
@@ -58,7 +60,13 @@ export const App: React.FC = () => {
 
   const handleStartChatWithUser = async (target: UserProfile) => {
     const code = CryptoService.generateRoomCode();
-    const { base64Key } = await CryptoService.generateRoomKey();
+    let base64Key = 'key_' + Math.random().toString(36).substring(2);
+    try {
+      const gen = await CryptoService.generateRoomKey();
+      base64Key = gen.base64Key;
+    } catch {
+      // fallback
+    }
 
     const room: ChatRoom = {
       id: 'room_' + code,
@@ -108,6 +116,19 @@ export const App: React.FC = () => {
     setActiveRoom(null);
   };
 
+  // If first time or user wants splash setup
+  if (showSplash || !currentUser) {
+    return (
+      <SplashScreen
+        onComplete={(user) => {
+          setCurrentUser(user);
+          setShowSplash(false);
+        }}
+      />
+    );
+  }
+
+  // Active chat session
   if (activeRoom) {
     return (
       <>
@@ -136,7 +157,6 @@ export const App: React.FC = () => {
             onAcceptRequest={handleAcceptRequest}
             onDeclineRequest={handleDeclineRequest}
             onClearRoom={handleClearRoom}
-            onNewChat={() => setActiveTab('vault')}
             onOpenSearch={() => setIsSearchOpen(true)}
             onOpenVault={() => setActiveTab('vault')}
             onOpenRadar={() => setActiveTab('radar')}
@@ -163,14 +183,14 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'profile' && (
-          <div className="pb-28 pt-4 px-4 max-w-md mx-auto">
-            <ProfileModal
-              isOpen={true}
-              onClose={() => setActiveTab('chats')}
-              currentUser={currentUser}
-              onSave={handleUpdateProfile}
-            />
-          </div>
+          <ProfileView
+            currentUser={currentUser}
+            onSave={handleUpdateProfile}
+            onResetAccount={() => {
+              setCurrentUser(null);
+              setShowSplash(true);
+            }}
+          />
         )}
       </main>
 
@@ -185,13 +205,6 @@ export const App: React.FC = () => {
         onClose={() => setIsSearchOpen(false)}
         currentUser={currentUser}
         onStartChat={handleStartChatWithUser}
-      />
-
-      <ProfileModal
-        isOpen={isProfileOpen}
-        onClose={() => setIsProfileOpen(false)}
-        currentUser={currentUser}
-        onSave={handleUpdateProfile}
       />
 
       <PanicModal
