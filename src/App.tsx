@@ -13,6 +13,7 @@ import { SearchModal } from './components/SearchModal';
 import { ProfileView } from './components/ProfileView';
 import { PanicModal } from './components/PanicModal';
 import { SplashScreen } from './components/SplashScreen';
+import { QRScannerModal } from './components/QRScannerModal';
 
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() =>
@@ -29,6 +30,7 @@ export const App: React.FC = () => {
   // Modals
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPanicOpen, setIsPanicOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
 
   // When user switches or logs in, load only that user's rooms
   useEffect(() => {
@@ -183,6 +185,71 @@ export const App: React.FC = () => {
     setActiveRoom(null);
   };
 
+  const handleScanSuccess = (decodedText: string) => {
+    const text = decodedText.trim();
+    let roomCode = '';
+
+    if (text.includes('/join/')) {
+      const parts = text.split('/join/');
+      const seg = parts[parts.length - 1];
+      if (seg.startsWith('@')) {
+        const targetHandle = seg.replace('@', '');
+        handleStartChatWithUser({
+          id: 'scanned_' + targetHandle,
+          handle: targetHandle,
+          displayName: targetHandle,
+          avatarId: 3,
+          vibe: '',
+          isAvailable: true,
+          country: 'India',
+          state: 'Delhi',
+          city: 'New Delhi',
+          lastActive: Date.now(),
+        });
+        return;
+      } else {
+        roomCode = seg.replace(/\D/g, '');
+      }
+    } else if (text.includes('room=')) {
+      const match = text.match(/room=([a-zA-Z0-9_-]+)/);
+      if (match) roomCode = match[1];
+    } else if (/^\d{6}$/.test(text)) {
+      roomCode = text;
+    }
+
+    if (roomCode) {
+      sound.playSend();
+      const room: ChatRoom = {
+        id: 'room_' + roomCode,
+        code: roomCode,
+        participantCount: 2,
+        timerSeconds: 30,
+        isBurnOnRead: false,
+        peerHandle: `Room #${roomCode}`,
+        peerAvatarId: 4,
+      };
+      setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
+      setActiveRoom(room);
+      return;
+    }
+
+    const cleanHandle = text.replace(/^@/, '').replace('user:', '').trim();
+    if (cleanHandle) {
+      handleStartChatWithUser({
+        id: 'scanned_' + cleanHandle,
+        handle: cleanHandle,
+        displayName: cleanHandle,
+        avatarId: 3,
+        vibe: '',
+        isAvailable: true,
+        country: 'India',
+        state: 'Delhi',
+        city: 'New Delhi',
+        lastActive: Date.now(),
+      });
+    }
+  };
+
   // If first time or user wants splash setup
   if (showSplash || !currentUser) {
     return (
@@ -229,7 +296,7 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col font-sans select-none">
+    <div className="min-h-screen bg-[#07080B] text-white flex flex-col font-sans select-none overflow-x-hidden">
       <main className="flex-1 overflow-y-auto">
         {activeTab === 'chats' && (
           <ChatsListView
@@ -243,6 +310,8 @@ export const App: React.FC = () => {
             onOpenSearch={() => setIsSearchOpen(true)}
             onOpenVault={() => setActiveTab('vault')}
             onTriggerPanic={handleTriggerPanic}
+            onOpenScanner={() => setIsScannerOpen(true)}
+            onStartChatWithUser={handleStartChatWithUser}
           />
         )}
 
@@ -290,6 +359,12 @@ export const App: React.FC = () => {
         onClose={() => setIsSearchOpen(false)}
         currentUser={currentUser}
         onStartChat={handleStartChatWithUser}
+      />
+
+      <QRScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScanSuccess={handleScanSuccess}
       />
 
       <PanicModal

@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Lock,
   Search,
-  Shield,
   Trash2,
+  QrCode,
+  Flame,
   MessageSquare,
+  ShieldAlert,
 } from 'lucide-react';
 import { ChatRoom, BlinkRequest, UserProfile } from '../types';
 import { Avatar } from './Avatar';
@@ -21,6 +23,8 @@ interface ChatsListViewProps {
   onOpenSearch: () => void;
   onOpenVault: () => void;
   onTriggerPanic: () => void;
+  onOpenScanner: () => void;
+  onStartChatWithUser: (user: UserProfile) => void;
 }
 
 function formatTimeAgo(timestamp?: number): string {
@@ -45,76 +49,85 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
   onOpenSearch,
   onOpenVault,
   onTriggerPanic,
+  onOpenScanner,
 }) => {
   return (
-    <div className="pb-28 max-w-md mx-auto select-none bg-[#090A0D] min-h-screen text-white relative">
-      {/* Ambient background glow */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-64 bg-[#D4FF00]/[0.02] blur-[100px] pointer-events-none" />
-
-      {/* Clean Header */}
-      <header className="sticky top-0 z-40 bg-[#0B0C10]/95 backdrop-blur-2xl px-4 py-3.5 flex items-center justify-between border-b border-white/[0.08] shadow-md">
+    <div className="pb-28 max-w-md mx-auto select-none bg-[#07080B] min-h-screen text-white relative font-sans">
+      {/* 1. Clean, Professional Top Bar (Telegram / Signal Standard) */}
+      <header className="sticky top-0 z-40 bg-[#07080B]/95 backdrop-blur-xl px-4 py-3 flex items-center justify-between border-b border-white/[0.06]">
         <div>
           <h1 className="font-extrabold text-2xl tracking-tight text-white">
             Messages
           </h1>
-          <p className="text-xs text-[#D4FF00] font-mono font-bold mt-0.5">
-            {currentUser.displayName || currentUser.handle}
+          <p className="text-[11px] text-zinc-400 font-mono">
+            @{currentUser.handle} {!currentUser.isAvailable && '• 👻 Ghost Mode'}
           </p>
         </div>
 
+        {/* Clean Header Action Icons */}
         <div className="flex items-center space-x-2">
+          {/* Working Camera QR Scanner */}
+          <button
+            onClick={onOpenScanner}
+            className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.12] active:scale-90 transition-all flex items-center justify-center text-zinc-300 hover:text-white"
+            title="Scan QR Code"
+          >
+            <QrCode className="w-4 h-4" />
+          </button>
+
+          {/* Search Button */}
+          <button
+            onClick={onOpenSearch}
+            className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.12] active:scale-90 transition-all flex items-center justify-center text-zinc-300 hover:text-white"
+            title="Search @handle"
+          >
+            <Search className="w-4 h-4" />
+          </button>
+
+          {/* Discreet Panic Switch */}
           <button
             onClick={onTriggerPanic}
-            className="px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold active:scale-90 transition-all flex items-center space-x-1.5 hover:bg-red-500/20"
+            className="w-9 h-9 rounded-full bg-red-500/10 hover:bg-red-500/20 active:scale-90 transition-all flex items-center justify-center text-red-400"
             title="Panic Purge"
           >
-            <Shield className="w-3.5 h-3.5 text-red-400" />
-            <span className="text-[10px] tracking-wider uppercase font-bold">Panic</span>
+            <ShieldAlert className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* Prominent Search Bar (Telegram / WhatsApp Style) */}
-      <div className="px-4 py-3">
-        <div
-          onClick={onOpenSearch}
-          className="w-full bg-[#15171F] border border-white/[0.08] hover:border-[#D4FF00]/30 rounded-2xl px-4 py-3 flex items-center space-x-2.5 cursor-pointer text-zinc-400 transition-all shadow-inner group"
-        >
-          <Search className="w-4 h-4 text-zinc-400 group-hover:text-[#D4FF00] transition-colors" />
-          <span className="text-xs font-medium text-zinc-400">
-            Search users by @handle...
-          </span>
-        </div>
-      </div>
-
-      {/* Incoming Requests */}
+      {/* 2. Incoming Requests (Clean notifications if any) */}
       {blinkRequests.length > 0 && (
-        <div className="p-4 border-b border-white/[0.06]">
-          <p className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
-            Incoming Requests ({blinkRequests.length})
+        <div className="p-3 mx-4 mt-3 rounded-2xl bg-[#0E111A] border border-[#D4FF00]/30 shadow-md">
+          <p className="text-[10px] font-mono text-[#D4FF00] font-black uppercase tracking-wider mb-2">
+            Incoming Chat Request ({blinkRequests.length})
           </p>
           <div className="space-y-2">
             {blinkRequests.map((req) => (
               <div
                 key={req.id}
-                className="p-3 rounded-2xl bg-[#141416] border border-white/[0.08] flex items-center justify-between"
+                className="p-2.5 rounded-xl bg-black/40 flex items-center justify-between"
               >
-                <div className="flex items-center space-x-3">
-                  <Avatar avatarId={req.fromUser.avatarId} size="sm" isOnline={true} name={req.fromUser.displayName || req.fromUser.handle} />
-                  <div>
-                    <h4 className="font-semibold text-sm text-white">
+                <div className="flex items-center space-x-2.5 min-w-0 pr-2">
+                  <Avatar
+                    avatarId={req.fromUser.avatarId}
+                    size="sm"
+                    isOnline={true}
+                    name={req.fromUser.displayName || req.fromUser.handle}
+                  />
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-xs text-white truncate">
                       {req.fromUser.displayName || req.fromUser.handle}
                     </h4>
-                    <p className="text-xs text-zinc-400">
-                      Encrypted chat request
+                    <p className="text-[10px] text-zinc-400 font-mono">
+                      @{req.fromUser.handle}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-1.5 shrink-0">
                   <button
                     onClick={() => onAcceptRequest(req)}
-                    className="px-3 py-1 rounded-full bg-[#D4FF00] text-black font-bold text-xs active:scale-95"
+                    className="px-3 py-1 rounded-lg bg-[#D4FF00] text-black font-black text-xs active:scale-95"
                   >
                     Accept
                   </button>
@@ -122,7 +135,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                     onClick={() => onDeclineRequest(req.id)}
                     className="px-2 py-1 text-xs text-zinc-400 hover:text-white"
                   >
-                    Ignore
+                    Decline
                   </button>
                 </div>
               </div>
@@ -131,83 +144,110 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
         </div>
       )}
 
-      {/* Active Chats Section */}
-      <div className="px-4 pt-1">
+      {/* 3. Professional Chat Conversations List */}
+      <div className="divide-y divide-white/[0.04]">
         {activeRooms.length > 0 ? (
-          <div className="space-y-1">
-            {activeRooms.map((room) => (
+          activeRooms.map((room) => {
+            const displayName =
+              room.peerDisplayName ||
+              (room.peerHandle && room.peerHandle !== 'Waiting for friend...'
+                ? room.peerHandle.replace(/^@/, '')
+                : `Room #${room.code}`);
+
+            const isDirect = room.code === 'DIRECT';
+
+            return (
               <div
                 key={room.id}
                 onClick={() => onOpenRoom(room)}
-                className="p-3 rounded-2xl hover:bg-[#121214] active:bg-[#18181c] transition-all flex items-center justify-between cursor-pointer border-b border-white/[0.04] last:border-0"
+                className="px-4 py-3 hover:bg-white/[0.03] active:bg-white/[0.06] transition-colors flex items-center justify-between cursor-pointer"
               >
-                <div className="flex items-center space-x-3 min-w-0 pr-2">
-                  <div className="relative">
+                <div className="flex items-center space-x-3.5 min-w-0 pr-3 flex-1">
+                  <div className="relative shrink-0">
                     <Avatar
                       avatarId={room.peerAvatarId || 3}
                       size="md"
-                      name={room.peerDisplayName || room.peerHandle || room.code}
+                      name={displayName}
                       isOnline={true}
                     />
-                    {room.unreadCount && room.unreadCount > 0 && (
-                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-[#D4FF00] rounded-full ring-2 ring-black" />
-                    )}
+                    {room.unreadCount && room.unreadCount > 0 ? (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-[#D4FF00] text-black text-[9px] font-black rounded-full ring-2 ring-[#07080B] flex items-center justify-center">
+                        {room.unreadCount}
+                      </span>
+                    ) : null}
                   </div>
 
-                  <div className="min-w-0">
-                    <div className="flex items-center space-x-1.5">
-                      <h4 className="font-semibold text-sm text-white truncate">
-                        {room.peerDisplayName || (room.peerHandle && room.peerHandle !== 'Waiting for friend...'
-                          ? room.peerHandle.replace(/^@/, '')
-                          : `Room #${room.code}`)}
-                      </h4>
-                      <Lock className="w-3 h-3 text-[#D4FF00] shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <div className="flex items-center space-x-1.5 min-w-0">
+                        <h4 className="font-bold text-[14.5px] text-white truncate">
+                          {displayName}
+                        </h4>
+                        {!isDirect && (
+                          <Lock className="w-3 h-3 text-[#D4FF00] shrink-0" />
+                        )}
+                      </div>
+
+                      <span className="text-[11px] text-zinc-400 font-mono shrink-0 ml-2">
+                        {room.lastMessageTime ? formatTimeAgo(room.lastMessageTime) : (isDirect ? 'Direct' : `#${room.code}`)}
+                      </span>
                     </div>
 
-                    <p className="text-xs text-zinc-400 truncate mt-0.5">
-                      {room.lastMessageText || (room.isBurnOnRead ? '🔥 Burn on read' : `⏱️ Disappears in ${room.timerSeconds}s`)}
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-zinc-400 truncate pr-2">
+                        {room.lastMessageText || (room.isBurnOnRead ? '🔥 Burn on read' : `⏱ Disappears in ${room.timerSeconds || 30}s`)}
+                      </p>
+
+                      {room.isBurnOnRead && (
+                        <Flame className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 shrink-0">
-                  <span className="text-[10px] text-zinc-500 font-mono">
-                    {room.lastMessageTime ? formatTimeAgo(room.lastMessageTime) : `#${room.code}`}
-                  </span>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      sound.playBurn();
-                      onClearRoom(room.id);
-                    }}
-                    className="p-2 rounded-full text-zinc-500 hover:text-red-400 active:scale-90 transition-all"
-                    title="Delete Chat"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    sound.playBurn();
+                    onClearRoom(room.id);
+                  }}
+                  className="p-2 text-zinc-400 hover:text-red-400 active:scale-90 transition-all shrink-0 -mr-1"
+                  title="Delete Chat"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
-            ))}
-          </div>
+            );
+          })
         ) : (
-          <div className="text-center py-24 px-4 rounded-3xl bg-[#0c0c0e] border border-white/[0.05] mt-2">
-            <div className="w-14 h-14 rounded-full bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-zinc-400 mx-auto mb-3 shadow-inner">
+          <div className="text-center py-28 px-6">
+            <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-zinc-400 mx-auto mb-4">
               <MessageSquare className="w-6 h-6 text-zinc-400" />
             </div>
-            <h3 className="font-semibold text-white text-base mb-1">
-              No Conversations Yet
+            <h3 className="font-bold text-white text-base mb-1">
+              No Messages Yet
             </h3>
             <p className="text-xs text-zinc-400 max-w-xs mx-auto mb-6 leading-relaxed">
-              Use the Search bar above to find a @handle, or open the Secret Room tab to connect with a 6-digit PIN.
+              Scan a QR code or search a @handle to start an end-to-end encrypted chat.
             </p>
 
-            <button
-              onClick={onOpenVault}
-              className="px-5 py-2.5 rounded-full bg-[#D4FF00] text-black font-extrabold text-xs active:scale-95 transition-transform shadow-[0_0_15px_rgba(212,255,0,0.3)]"
-            >
-              Open Secret Room
-            </button>
+            <div className="flex items-center justify-center space-x-3">
+              <button
+                onClick={onOpenScanner}
+                className="px-4 py-2 rounded-xl bg-[#D4FF00] text-black font-extrabold text-xs active:scale-95 transition-all shadow-md flex items-center space-x-1.5"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                <span>Scan QR</span>
+              </button>
+
+              <button
+                onClick={onOpenSearch}
+                className="px-4 py-2 rounded-xl bg-white/[0.08] hover:bg-white/[0.12] text-white font-bold text-xs active:scale-95 transition-all flex items-center space-x-1.5"
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Find @handle</span>
+              </button>
+            </div>
           </div>
         )}
       </div>

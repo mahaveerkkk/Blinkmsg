@@ -8,16 +8,22 @@ export default {
   theme: {
     extend: {
       colors: {
+        brand: {
+          lime: '#D4FF00',
+          emerald: '#00F5A0',
+          cyan: '#00D4FF',
+          dark: '#07080B',
+        },
         dark: {
-          bg: '#000000',        // Pure Pitch Black (OLED)
-          surface: '#0d0d0e',   // Deep subtle layer
-          card: '#151518',      // Clean modern card
-          border: '#222226',    // Subtle minimal border
-          hover: '#1c1c20',
-          text: '#ffffff',
-          muted: '#8e8e93',     // Apple style secondary
-          bubbleSent: '#1e3a2b', // Subtle muted forest/emerald (Signal/Telegram style)
-          bubbleReceived: '#1c1c1e', // Apple dark bubble
+          bg: '#07080B',        // Deep Obsidian Space
+          surface: '#0E1016',   // Rich Layered Surface
+          card: '#141720',      // Elevated Card
+          border: 'rgba(255, 255, 255, 0.08)',
+          hover: '#1B1F2B',
+          text: '#F3F4F6',
+          muted: '#8E95A5',     // Modern Secondary Text
+          bubbleSent: '#0E3A2A', // Signal/Telegram luxury emerald
+          bubbleReceived: '#141720', // Apple dark bubble
         }
       },
     },

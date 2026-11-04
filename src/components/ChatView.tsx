@@ -63,6 +63,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [peerAvatarId, setPeerAvatarId] = useState(room.peerAvatarId || 3);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
   const [screenshotToast, setScreenshotToast] = useState<string | null>(null);
+  const [nowTime, setNowTime] = useState<number>(Date.now());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -245,10 +246,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return () => unsubscribe();
   }, [room.id]);
 
-  // Master countdown timer for message self-destruction
+  // Master live countdown timer for message self-destruction & UI tick
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
+      setNowTime(now);
 
       setMessages((prev) => {
         let hasExpired = false;
@@ -265,7 +267,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         if (hasExpired) sound.playBurn();
         return hasExpired ? next : prev;
       });
-    }, 500);
+    }, 250);
 
     return () => clearInterval(interval);
   }, []);
@@ -420,12 +422,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#090A0D] text-white select-none relative overflow-hidden font-sans">
+    <div className="flex flex-col h-[100dvh] bg-[#07080B] text-white select-none relative overflow-hidden font-sans">
       {/* Ambient background glow for visual depth */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#D4FF00]/[0.025] blur-[120px] pointer-events-none" />
 
       {/* Top Header (Luxury Signal / iOS Glass Style) */}
-      <header className="px-3.5 py-2.5 bg-[#0B0C10]/90 backdrop-blur-2xl border-b border-white/[0.08] flex items-center justify-between shrink-0 z-30 shadow-md">
+      <header className="px-3.5 py-2.5 bg-[#07080B]/90 backdrop-blur-2xl border-b border-white/[0.08] flex items-center justify-between shrink-0 z-30 shadow-md">
         <div className="flex items-center space-x-2.5 min-w-0">
           <button
             onClick={onLeaveRoom}
@@ -537,8 +539,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
             );
           }
 
-          const timeLeftMs = msg.expiresAt ? Math.max(0, msg.expiresAt - Date.now()) : 0;
+          const timeLeftMs = msg.expiresAt ? Math.max(0, msg.expiresAt - nowTime) : 0;
           const timeLeftSec = Math.ceil(timeLeftMs / 1000);
+          const totalDurationMs = (msg.timerSeconds || 30) * 1000;
+          const progressPercent = msg.expiresAt
+            ? Math.min(100, Math.max(0, (timeLeftMs / totalDurationMs) * 100))
+            : 100;
 
           return (
             <div
@@ -555,7 +561,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               >
                 {/* Ephemeral Photo Bubble */}
                 {msg.mediaUrl && (
-                  <div className="mb-2 rounded-xl overflow-hidden max-w-[260px] shadow-inner">
+                  <div className="mb-2 rounded-xl overflow-hidden max-w-[260px] shadow-inner relative">
                     {msg.isBurnOnRead && !msg.isRevealed && !isMe ? (
                       <button
                         onClick={(e) => {
@@ -569,11 +575,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <span className="text-[10px] text-zinc-500 mt-0.5">Burns in 6 seconds</span>
                       </button>
                     ) : (
-                      <img
-                        src={msg.mediaUrl}
-                        alt="Ephemeral"
-                        className="w-full max-h-64 object-cover rounded-xl"
-                      />
+                      <div className="relative">
+                        <img
+                          src={msg.mediaUrl}
+                          alt="Ephemeral"
+                          className="w-full max-h-64 object-cover rounded-xl"
+                        />
+                        {msg.isBurnOnRead && msg.isRevealed && (
+                          <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md border border-red-500/50 text-red-400 text-[10px] font-mono font-bold flex items-center space-x-1 animate-pulse">
+                            <Flame className="w-3 h-3 fill-red-400" />
+                            <span>Burns in {timeLeftSec}s</span>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
@@ -599,16 +613,29 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 ) : (
                   <div className="break-words">
                     <span>{msg.text}</span>
-                    {/* Inline Telegram-style timestamp & status */}
-                    <span className="inline-flex items-center space-x-1 float-right ml-2.5 mt-1 -mb-0.5 select-none text-[10.5px] font-mono text-zinc-400/80">
+
+                    {/* Inline Telegram-style timestamp, LIVE COUNTDOWN & status */}
+                    <span className="inline-flex items-center space-x-1.5 float-right ml-2.5 mt-1 -mb-0.5 select-none text-[10.5px] font-mono text-zinc-400/80">
+                      {/* LIVE COUNTDOWN TICKER */}
                       {msg.expiresAt > 0 && (!msg.isBurnOnRead || msg.isRevealed) && (
-                        <span className="text-[#D4FF00] font-semibold">
-                          ⏱{timeLeftSec}s
+                        <span
+                          className={`inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded font-mono text-[10px] font-bold select-none transition-colors ${
+                            timeLeftSec <= 5
+                              ? 'bg-red-500/25 text-red-400 border border-red-500/40 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.35)]'
+                              : 'bg-black/30 text-[#D4FF00] border border-[#D4FF00]/30'
+                          }`}
+                        >
+                          {timeLeftSec <= 5 ? (
+                            <Flame className="w-2.5 h-2.5 fill-red-400 text-red-400 animate-bounce mr-0.5" />
+                          ) : (
+                            <span className="text-[9px] mr-0.5">⏱</span>
+                          )}
+                          <span>{timeLeftSec}s</span>
                         </span>
                       )}
 
                       {msg.isBurnOnRead && !msg.isRevealed && (
-                        <span className="flex items-center text-amber-400 font-bold">
+                        <span className="flex items-center text-amber-400 font-bold px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px]">
                           <Flame className="w-2.5 h-2.5 fill-current mr-0.5" />
                           burn
                         </span>
@@ -628,6 +655,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         </span>
                       )}
                     </span>
+
+                    {/* Self-destruction Live Burning Fuse Bar */}
+                    {msg.expiresAt > 0 && (!msg.isBurnOnRead || msg.isRevealed) && (
+                      <div className="w-full h-[2px] bg-black/40 rounded-full overflow-hidden mt-1.5 clear-both">
+                        <div
+                          className={`h-full rounded-full transition-all duration-200 ${
+                            timeLeftSec <= 5
+                              ? 'bg-gradient-to-r from-red-500 to-amber-500 shadow-[0_0_6px_#ef4444]'
+                              : 'bg-gradient-to-r from-[#D4FF00] to-[#00F5A0]'
+                          }`}
+                          style={{ width: `${progressPercent}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -675,7 +716,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       </div>
 
       {/* Floating Bottom Input Bar (iOS / Telegram Style) */}
-      <div className="p-3 bg-[#0A0B0E]/95 backdrop-blur-2xl border-t border-white/[0.08] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20">
+      <div className="p-3 bg-[#07080B]/95 backdrop-blur-2xl border-t border-white/[0.08] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20">
         <div className="flex items-center space-x-2 max-w-lg mx-auto">
           {/* Hidden File Input for Ephemeral Photos */}
           <input
@@ -688,20 +729,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="w-10 h-10 rounded-full bg-[#15171F] hover:bg-[#1E202B] border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center active:scale-90 transition-all shrink-0 shadow-sm"
+            className="w-10 h-10 rounded-full bg-[#11141D] hover:bg-[#181D2A] border border-white/[0.08] text-zinc-300 hover:text-white flex items-center justify-center active:scale-90 transition-all shrink-0 shadow-sm"
             title="Send Confidential Photo"
           >
             <Camera className="w-5 h-5 text-zinc-300" />
           </button>
 
-          <div className="flex-1 bg-[#15171F] border border-white/[0.08] focus-within:border-[#D4FF00]/40 rounded-full px-4 py-2 flex items-center transition-all shadow-inner">
+          <div className="flex-1 bg-[#11141D] border border-white/[0.08] focus-within:border-[#D4FF00]/50 rounded-full px-4 py-2 flex items-center transition-all shadow-inner">
             <input
               type="text"
               value={inputText}
               onChange={(e) => handleTyping(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
               placeholder="Confidential message..."
-              className="w-full bg-transparent text-[14.5px] text-white placeholder-zinc-500 outline-none"
+              className="w-full bg-transparent text-[14.5px] text-white placeholder-zinc-500 outline-none font-medium"
             />
           </div>
 
@@ -710,8 +751,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
             disabled={!inputText.trim()}
             className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all duration-200 active:scale-90 shrink-0 ${
               inputText.trim()
-                ? 'bg-[#D4FF00] text-black shadow-[0_0_15px_rgba(212,255,0,0.35)] scale-100 cursor-pointer'
-                : 'bg-[#15171F] text-zinc-600 border border-white/[0.06] scale-95 opacity-50 cursor-not-allowed'
+                ? 'bg-[#D4FF00] hover:bg-[#c4ed00] text-black shadow-[0_0_15px_rgba(212,255,0,0.35)] scale-100 cursor-pointer'
+                : 'bg-[#11141D] text-zinc-600 border border-white/[0.06] scale-95 opacity-50 cursor-not-allowed'
             }`}
           >
             <ArrowUp className="w-5 h-5 stroke-[2.5]" />

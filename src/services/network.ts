@@ -16,69 +16,8 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
     })
   : null;
 
-// Mock active radar users for rich immediate testing & experience
-export const MOCK_RADAR_USERS: UserProfile[] = [
-  {
-    id: 'usr_mock_1',
-    handle: 'neon_rider',
-    displayName: 'NeonRider',
-    avatarId: 2,
-    vibe: '⚡ Late night crypto & coding talks',
-    isAvailable: true,
-    country: 'India',
-    state: 'Maharashtra',
-    city: 'Mumbai',
-    lastActive: Date.now() - 1000 * 30,
-  },
-  {
-    id: 'usr_mock_2',
-    handle: 'shadow_alex',
-    displayName: 'ShadowAlex',
-    avatarId: 4,
-    vibe: '🕶️ Ghost mode active. Ask me anything.',
-    isAvailable: true,
-    country: 'India',
-    state: 'Delhi',
-    city: 'New Delhi',
-    lastActive: Date.now() - 1000 * 60,
-  },
-  {
-    id: 'usr_mock_3',
-    handle: 'cyber_priya',
-    displayName: 'CyberPriya',
-    avatarId: 6,
-    vibe: '🔥 Burn after reading. Music & tech.',
-    isAvailable: true,
-    country: 'India',
-    state: 'Karnataka',
-    city: 'Bengaluru',
-    lastActive: Date.now() - 1000 * 120,
-  },
-  {
-    id: 'usr_mock_4',
-    handle: 'silent_ninja',
-    displayName: 'SilentNinja',
-    avatarId: 7,
-    vibe: '🌙 Sleep is for the weak',
-    isAvailable: true,
-    country: 'United States',
-    state: 'California',
-    city: 'San Francisco',
-    lastActive: Date.now() - 1000 * 45,
-  },
-  {
-    id: 'usr_mock_5',
-    handle: 'zen_voyager',
-    displayName: 'ZenVoyager',
-    avatarId: 3,
-    vibe: '☕ Looking for deep philosophy chats',
-    isAvailable: true,
-    country: 'India',
-    state: 'Rajasthan',
-    city: 'Jaipur',
-    lastActive: Date.now() - 1000 * 90,
-  },
-];
+// Empty list - only real registered profiles are fetched from Supabase
+export const MOCK_RADAR_USERS: UserProfile[] = [];
 
 // Persistent channel registries to prevent memory leaks & duplicate listeners
 const activeBroadcastChannels = new Map<string, BroadcastChannel>();
@@ -648,6 +587,37 @@ export class NetworkService {
       return Array.from(roomMap.values());
     } catch (err) {
       console.warn('Failed to fetch user DMs:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Fetches real active user profiles registered in Supabase
+   */
+  static async fetchActiveProfiles(currentHandle?: string): Promise<UserProfile[]> {
+    if (!supabase) return [];
+    try {
+      let query = supabase.from('profiles').select('*').eq('is_available', true).limit(50);
+      if (currentHandle) {
+        query = query.neq('handle', currentHandle.toLowerCase());
+      }
+      const { data, error } = await query;
+      if (error || !data) return [];
+
+      return data.map((d: any) => ({
+        id: d.id || 'usr_' + d.handle,
+        handle: d.handle,
+        displayName: d.display_name || d.handle,
+        avatarId: d.avatar_id || 1,
+        vibe: d.vibe || '',
+        isAvailable: d.is_available ?? true,
+        country: d.country || 'India',
+        state: d.state || '',
+        city: d.city || 'New Delhi',
+        lastActive: Date.now(),
+      }));
+    } catch (err) {
+      console.warn('Failed to fetch active profiles:', err);
       return [];
     }
   }

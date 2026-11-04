@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Copy, Check, RefreshCw, ArrowRight, ShieldCheck, KeyRound, Radio } from 'lucide-react';
+import { Copy, Check, RefreshCw, KeyRound, Radio, ShieldCheck, Sparkles, ArrowRight } from 'lucide-react';
 import { ChatRoom, UserProfile } from '../types';
 import { sound } from '../services/sound';
 import { StorageService } from '../services/storage';
@@ -23,15 +23,11 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
   const inviteUrl = `https://blinkmsg.app/join/${myCode}`;
 
-  // Automatically listen to our room code while on this screen!
-  // As soon as a peer connects (peer_join) or sends any message (message),
-  // automatically pull User A into ChatView without forcing them to click "Enter Room"!
   useEffect(() => {
     if (mode !== 'create' || !myCode) return;
 
     const roomId = `room_${myCode}`;
 
-    // Ensure room exists in Supabase
     if (supabase) {
       supabase
         .from('chat_rooms')
@@ -150,7 +146,6 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
       }
     }
 
-    // Broadcast our join presence so User A's listening screen immediately triggers auto-entry!
     NetworkService.broadcastPeerJoin(roomId, currentUser.handle, currentUser.displayName, currentUser.avatarId);
 
     const room: ChatRoom = {
@@ -166,100 +161,119 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
   };
 
   return (
-    <div className="pb-28 pt-4 px-4 max-w-md mx-auto select-none font-sans">
-      <div className="mb-4">
-        <h1 className="font-extrabold text-2xl tracking-tight text-white">
-          Secret Room
-        </h1>
-        <p className="text-xs text-zinc-400 mt-0.5">
-          Give your 6-digit PIN to a friend. As soon as they enter it, you both connect instantly.
+    <div className="pb-32 pt-4 px-4 max-w-md mx-auto select-none font-sans min-h-screen bg-[#07080B] text-white">
+      {/* Header */}
+      <div className="mb-5">
+        <div className="flex items-center space-x-2">
+          <h1 className="font-black text-2xl tracking-tight text-white">
+            Secret PIN Room
+          </h1>
+          <span className="px-2 py-0.5 rounded-full bg-[#D4FF00]/10 text-[#D4FF00] text-[10px] font-mono font-bold border border-[#D4FF00]/25">
+            P2P DISCOVERY
+          </span>
+        </div>
+        <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+          Share your 6-digit PIN or scan QR. You connect together instantly with zero metadata saved.
         </p>
       </div>
 
       {/* Mode Switcher */}
-      <div className="flex rounded-2xl bg-[#141620] p-1 border border-white/[0.08] mb-5 shadow-inner">
+      <div className="flex rounded-2xl bg-[#0E1017] p-1 border border-white/[0.08] mb-6 shadow-inner">
         <button
-          onClick={() => { sound.vibrate(6); setMode('create'); }}
-          className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+          onClick={() => {
+            sound.vibrate(6);
+            setMode('create');
+          }}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${
             mode === 'create'
-              ? 'bg-[#D4FF00] text-black shadow-md'
+              ? 'bg-[#D4FF00] text-black shadow-lg shadow-[#D4FF00]/20'
               : 'text-zinc-400 hover:text-white'
           }`}
         >
-          My Room Code
+          My Secret Code
         </button>
         <button
-          onClick={() => { sound.vibrate(6); setMode('join'); }}
-          className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+          onClick={() => {
+            sound.vibrate(6);
+            setMode('join');
+          }}
+          className={`flex-1 py-2.5 rounded-xl text-xs font-black transition-all ${
             mode === 'join'
-              ? 'bg-[#D4FF00] text-black shadow-md'
+              ? 'bg-[#D4FF00] text-black shadow-lg shadow-[#D4FF00]/20'
               : 'text-zinc-400 hover:text-white'
           }`}
         >
-          Join with Code
+          Enter Friend's PIN
         </button>
       </div>
 
       {mode === 'create' && (
-        <div className="rounded-[28px] bg-[#0c0e14]/90 backdrop-blur-2xl border border-white/[0.08] p-5 flex flex-col items-center text-center shadow-2xl relative overflow-hidden">
-          {/* Top Sheen */}
-          <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#D4FF00]/50 to-transparent" />
+        <div className="rounded-[32px] bg-gradient-to-b from-[#0F121C] via-[#0B0D14] to-[#07080B] border border-white/[0.1] p-6 flex flex-col items-center text-center shadow-[0_20px_50px_rgba(0,0,0,0.8)] relative overflow-hidden animate-fade-in">
+          {/* Top Sheen Line */}
+          <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#D4FF00]/60 to-transparent" />
 
-          {/* Room Code Badge */}
-          <div className="flex items-center space-x-2 mb-3 mt-1">
-            <span className="text-xs text-zinc-400 font-medium">Your PIN:</span>
-            <span className="px-4 py-1.5 rounded-xl bg-black text-[#D4FF00] font-mono text-2xl font-black tracking-widest border border-[#D4FF00]/40 shadow-[0_0_15px_rgba(212,255,0,0.15)]">
-              {myCode}
-            </span>
-            <button
-              onClick={handleCopyCode}
-              className="p-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-zinc-300 hover:text-white active:scale-90 transition-all border border-white/[0.06]"
-              title="Copy PIN"
-            >
-              {copiedCode ? <Check className="w-4 h-4 text-[#D4FF00]" /> : <Copy className="w-4 h-4" />}
-            </button>
-            <button
-              onClick={handleGenerateNewCode}
-              className="p-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-zinc-300 hover:text-white active:scale-90 transition-all border border-white/[0.06]"
-              title="Generate New PIN"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+          {/* 6-Digit PIN Display Card */}
+          <div className="w-full bg-[#07080B] border border-white/[0.08] rounded-2xl p-4 mb-4 shadow-inner flex items-center justify-between">
+            <div className="text-left">
+              <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block">
+                Session Room PIN
+              </span>
+              <span className="font-mono text-3xl font-black text-[#D4FF00] tracking-widest drop-shadow-[0_0_15px_rgba(212,255,0,0.3)]">
+                {myCode}
+              </span>
+            </div>
+
+            <div className="flex items-center space-x-1.5">
+              <button
+                onClick={handleCopyCode}
+                className="p-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-zinc-200 active:scale-90 transition-all border border-white/[0.08]"
+                title="Copy PIN"
+              >
+                {copiedCode ? <Check className="w-4 h-4 text-[#D4FF00]" /> : <Copy className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={handleGenerateNewCode}
+                className="p-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-zinc-200 active:scale-90 transition-all border border-white/[0.08]"
+                title="Generate New PIN"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
-          {/* Live Auto-Listen Radar Pill */}
-          <div className="flex items-center space-x-2 mb-4 py-1 px-3.5 rounded-full bg-[#D4FF00]/10 border border-[#D4FF00]/25 text-[#D4FF00] text-[11px] font-mono font-bold animate-pulse">
-            <span className="w-2 h-2 rounded-full bg-[#D4FF00] animate-ping shrink-0" />
-            <span>Listening for friend... (Auto-connects)</span>
+          {/* Radar Listening Badge */}
+          <div className="flex items-center space-x-2 mb-5 py-1.5 px-4 rounded-full bg-[#00F5A0]/10 border border-[#00F5A0]/30 text-[#00F5A0] text-xs font-mono font-bold">
+            <span className="w-2 h-2 rounded-full bg-[#00F5A0] animate-ping shrink-0" />
+            <span>Listening live • Auto-connects when friend joins</span>
           </div>
 
-          {/* Clean White QR */}
-          <div className="p-3.5 bg-white rounded-2xl mb-4 shadow-xl">
+          {/* High-Contrast QR Code Card */}
+          <div className="p-4 bg-white rounded-3xl mb-4 shadow-2xl relative group">
             <QRCodeSVG
               value={inviteUrl}
-              size={170}
+              size={175}
               bgColor="#ffffff"
               fgColor="#000000"
               level="M"
             />
           </div>
 
-          <p className="text-xs text-zinc-400 mb-5 max-w-xs leading-relaxed">
-            Scan QR or share the 6-digit PIN. As soon as your friend enters it, your screen will automatically open the chat.
+          <p className="text-xs text-zinc-400 mb-6 max-w-xs leading-relaxed">
+            Your friend can scan this QR or type your 6-digit PIN. As soon as they type it, both of your screens open the chat simultaneously.
           </p>
 
-          <div className="w-full space-y-2">
+          <div className="w-full space-y-2.5">
             <button
               onClick={handleEnterMyRoom}
-              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black text-xs font-black flex items-center justify-center space-x-2 active:scale-95 transition-transform shadow-[0_0_20px_rgba(212,255,0,0.3)] sheen-shimmer"
+              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black text-xs font-black flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,255,0,0.3)]"
             >
               <KeyRound className="w-4 h-4" />
-              <span>Enter Room Directly & Wait Inside</span>
+              <span>Enter Room & Wait Inside</span>
             </button>
 
             <button
               onClick={handleCopyLink}
-              className="w-full py-3 rounded-2xl bg-[#15171F] border border-white/[0.08] text-white text-xs font-semibold flex items-center justify-center space-x-1.5 active:scale-95 transition-all hover:bg-white/[0.08]"
+              className="w-full py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] text-white text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
             >
               {copiedLink ? <Check className="w-4 h-4 text-[#D4FF00]" /> : <Copy className="w-4 h-4" />}
               <span>{copiedLink ? 'Invite Link Copied!' : 'Copy Direct Link'}</span>
@@ -269,13 +283,16 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
       )}
 
       {mode === 'join' && (
-        <div className="rounded-[28px] bg-[#0c0e14]/90 backdrop-blur-2xl border border-white/[0.08] p-6 shadow-2xl relative overflow-hidden animate-fade-in">
+        <div className="rounded-[32px] bg-gradient-to-b from-[#0F121C] via-[#0B0D14] to-[#07080B] border border-white/[0.1] p-6 shadow-2xl relative overflow-hidden animate-fade-in text-center">
           {/* Top Sheen */}
-          <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#D4FF00]/50 to-transparent" />
+          <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#D4FF00]/60 to-transparent" />
 
-          <label className="block text-xs font-bold text-zinc-300 mb-2 uppercase tracking-wider text-center">
+          <label className="block text-xs font-black text-zinc-300 mb-2 uppercase tracking-wider">
             Enter Friend's 6-Digit PIN
           </label>
+          <p className="text-xs text-zinc-500 mb-5">
+            Both parties will enter the encrypted room instantly.
+          </p>
 
           <input
             type="text"
@@ -289,22 +306,17 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
             }}
             placeholder="000000"
             autoFocus
-            className="w-full py-4 px-4 rounded-2xl bg-black border border-white/10 text-center font-mono text-3xl tracking-[0.3em] text-[#D4FF00] placeholder-zinc-800 outline-none mb-4 shadow-inner focus:border-[#D4FF00]/60"
+            className="w-full py-4 px-4 rounded-2xl bg-[#07080B] border border-white/[0.12] text-center font-mono text-3xl font-black tracking-[0.35em] text-[#D4FF00] placeholder-zinc-800 outline-none mb-5 shadow-inner focus:border-[#D4FF00]/80 transition-colors"
           />
 
           <button
             onClick={handleJoinByCode}
             disabled={joinCode.trim().length < 6}
-            className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black font-black text-xs flex items-center justify-center space-x-1.5 disabled:opacity-30 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,255,0,0.3)] sheen-shimmer"
+            className="w-full py-3.5 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black font-black text-xs flex items-center justify-center space-x-2 disabled:opacity-30 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,255,0,0.3)]"
           >
             <span>Connect & Chat Now</span>
-            <ArrowRight className="w-4 h-4 stroke-[2.5]" />
+            <ArrowRight className="w-4 h-4 stroke-[3]" />
           </button>
-
-          <div className="mt-5 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center space-x-2 text-zinc-400 text-xs">
-            <ShieldCheck className="w-4 h-4 text-[#D4FF00] shrink-0" />
-            <span>Messages self-destruct. Room is purged once both leave.</span>
-          </div>
         </div>
       )}
     </div>
