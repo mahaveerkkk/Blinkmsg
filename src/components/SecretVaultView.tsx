@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { KeyRound, QrCode, ArrowRight, ShieldCheck, Copy, Check, Sparkles, RefreshCw } from 'lucide-react';
+import { Key, Copy, Check, RefreshCw, ArrowRight } from 'lucide-react';
 import { ChatRoom, UserProfile } from '../types';
 import { CryptoService } from '../services/crypto';
 import { sound } from '../services/sound';
@@ -19,9 +19,8 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
   const [joinCode, setJoinCode] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Generate new secret room on mount or refresh
   const handleGenerateRoom = async () => {
-    sound.vibrate(15);
+    sound.vibrate(10);
     const code = CryptoService.generateRoomCode();
     const { base64Key } = await CryptoService.generateRoomKey();
 
@@ -44,7 +43,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     if (!createdRoom) return;
     const inviteUrl = `${window.location.origin}/#room=${createdRoom.code}&key=${createdRoom.secretKey}`;
     navigator.clipboard?.writeText(inviteUrl);
-    sound.vibrate(20);
+    sound.vibrate(15);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
@@ -60,7 +59,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
       participantCount: 2,
       timerSeconds: 30,
       isBurnOnRead: false,
-      peerHandle: 'SecretPeer',
+      peerHandle: 'Peer',
       peerAvatarId: 5,
     };
     onEnterRoom(room);
@@ -71,104 +70,86 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     : '';
 
   return (
-    <div className="pb-24 pt-3 px-4 max-w-lg mx-auto">
-      {/* Vault Header */}
-      <div className="text-center mb-5">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 mb-2 shadow-[0_0_15px_rgba(0,255,170,0.2)]">
-          <KeyRound className="w-6 h-6" />
-        </div>
-        <h2 className="text-lg font-black text-slate-100 tracking-wide">
-          Secret Vault
-        </h2>
-        <p className="text-xs text-slate-400">
-          Zero-Trace Room • No Accounts • Burns on Exit
-        </p>
-      </div>
-
-      {/* Mode Selector Tabs */}
-      <div className="flex rounded-2xl bg-[#0d111a] p-1 border border-[#1f293d] mb-6">
+    <div className="pb-24 pt-4 px-4 max-w-md mx-auto select-none">
+      {/* Mode Switcher */}
+      <div className="flex rounded-xl bg-[#141416] p-1 border border-[#222226] mb-5">
         <button
-          onClick={() => { sound.vibrate(10); setMode('create'); }}
-          className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+          onClick={() => { sound.vibrate(6); setMode('create'); }}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
             mode === 'create'
-              ? 'bg-emerald-500 text-slate-950 shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-[#27272a] text-white shadow-sm'
+              : 'text-zinc-500 hover:text-zinc-300'
           }`}
         >
-          Create Room (QR)
+          Create Room
         </button>
         <button
-          onClick={() => { sound.vibrate(10); setMode('join'); }}
-          className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+          onClick={() => { sound.vibrate(6); setMode('join'); }}
+          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
             mode === 'join'
-              ? 'bg-emerald-500 text-slate-950 shadow-md'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'bg-[#27272a] text-white shadow-sm'
+              : 'text-zinc-500 hover:text-zinc-300'
           }`}
         >
           Join with Code
         </button>
       </div>
 
-      {/* Mode 1: Create Room */}
       {mode === 'create' && createdRoom && (
-        <div className="rounded-3xl bg-[#0d111a] border border-[#1f293d] p-5 shadow-2xl flex flex-col items-center text-center">
-          {/* 6-Digit Code Badge */}
+        <div className="rounded-2xl bg-[#121214] border border-[#1f1f23] p-5 flex flex-col items-center text-center">
+          {/* Room Code */}
           <div className="flex items-center space-x-2 mb-4">
-            <span className="text-xs text-slate-400 font-mono">Room Code:</span>
-            <div className="px-3.5 py-1.5 rounded-xl bg-[#131824] border border-cyan-500/40 text-cyan-300 font-mono text-base font-black tracking-widest shadow-inner">
+            <span className="text-xs text-zinc-400">Code:</span>
+            <span className="px-3 py-1 rounded-lg bg-black text-white font-mono text-base font-semibold tracking-wider border border-white/10">
               {createdRoom.code}
-            </div>
+            </span>
             <button
               onClick={handleGenerateRoom}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 active:rotate-180 transition-all"
-              title="Regenerate Code"
+              className="p-1 rounded-md text-zinc-500 hover:text-white"
+              title="New code"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Glowing QR Code Card */}
-          <div className="p-4 bg-white rounded-3xl shadow-[0_0_25px_rgba(0,255,170,0.3)] mb-4">
+          {/* Clean White QR */}
+          <div className="p-3 bg-white rounded-2xl mb-4">
             <QRCodeSVG
               value={inviteUrl}
-              size={180}
+              size={160}
               bgColor="#ffffff"
-              fgColor="#05070d"
+              fgColor="#000000"
               level="M"
-              includeMargin={false}
             />
           </div>
 
-          <p className="text-[12px] text-slate-400 mb-5 max-w-xs">
-            Scan with any camera or enter the 6-digit code. Keys never touch our database.
+          <p className="text-xs text-zinc-400 mb-5 max-w-xs">
+            Scan to connect. Messages burn automatically and leave zero trace.
           </p>
 
-          {/* Action Buttons */}
-          <div className="w-full space-y-2.5">
+          <div className="w-full space-y-2">
             <button
               onClick={handleCopyLink}
-              className="w-full py-3 rounded-2xl bg-[#131824] border border-[#1f293d] hover:border-emerald-500/40 text-slate-200 text-xs font-semibold flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-sm"
+              className="w-full py-2.5 rounded-xl bg-[#1a1a1e] border border-white/5 text-zinc-200 text-xs font-medium flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
             >
-              {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-cyan-400" />}
-              <span>{copiedLink ? 'Link Copied!' : 'Copy Private Invite Link'}</span>
+              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedLink ? 'Link Copied' : 'Copy Invite Link'}</span>
             </button>
 
             <button
               onClick={() => onEnterRoom(createdRoom)}
-              className="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-xs font-bold flex items-center justify-center space-x-2 shadow-[0_0_15px_rgba(0,255,170,0.4)] active:scale-95 transition-transform"
+              className="w-full py-2.5 rounded-xl bg-white text-black text-xs font-semibold flex items-center justify-center active:scale-95 transition-transform"
             >
-              <Sparkles className="w-4 h-4 fill-current" />
-              <span>Enter Room Now</span>
+              Enter Room
             </button>
           </div>
         </div>
       )}
 
-      {/* Mode 2: Join Room */}
       {mode === 'join' && (
-        <div className="rounded-3xl bg-[#0d111a] border border-[#1f293d] p-5 shadow-2xl">
-          <label className="block text-xs font-bold text-slate-300 mb-2 uppercase tracking-wider">
-            Enter 6-Digit Room Code
+        <div className="rounded-2xl bg-[#121214] border border-[#1f1f23] p-5">
+          <label className="block text-xs font-medium text-zinc-400 mb-2">
+            Enter 6-digit room code
           </label>
 
           <input
@@ -176,25 +157,18 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
             maxLength={6}
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, ''))}
-            placeholder="e.g. 749201"
-            className="w-full py-3.5 px-4 rounded-2xl bg-[#131824] border border-[#1f293d] focus:border-emerald-500/60 text-center font-mono text-xl tracking-[0.3em] text-slate-100 placeholder-slate-600 outline-none transition-all shadow-inner mb-4"
+            placeholder="000000"
+            className="w-full py-3 px-4 rounded-xl bg-black border border-white/10 text-center font-mono text-lg tracking-[0.25em] text-white placeholder-zinc-700 outline-none mb-4"
           />
 
           <button
             onClick={handleJoinByCode}
             disabled={joinCode.length < 6}
-            className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-xs flex items-center justify-center space-x-2 shadow-lg disabled:opacity-40 disabled:scale-100 active:scale-95 transition-all"
+            className="w-full py-2.5 rounded-xl bg-white text-black font-semibold text-xs flex items-center justify-center space-x-1 disabled:opacity-30 active:scale-95 transition-all"
           >
-            <span>Connect & Decrypt Room</span>
-            <ArrowRight className="w-4 h-4" />
+            <span>Join Room</span>
+            <ArrowRight className="w-3.5 h-3.5 ml-1" />
           </button>
-
-          <div className="mt-6 p-3.5 rounded-2xl bg-[#131824]/60 border border-[#1f293d] text-slate-400 text-[11px] leading-relaxed flex items-start space-x-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-            <span>
-              Rooms self-destruct once both participants exit. No messages are ever archived.
-            </span>
-          </div>
         </div>
       )}
     </div>

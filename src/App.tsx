@@ -17,7 +17,8 @@ export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile>(() =>
     StorageService.getOrCreateProfile()
   );
-  const [activeTab, setActiveTab] = useState<ActiveTab>('radar');
+  // Default tab is 'chats' for real messenger feel
+  const [activeTab, setActiveTab] = useState<ActiveTab>('chats');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
   const [activeRoomsList, setActiveRoomsList] = useState<ChatRoom[]>([]);
   const [blinkRequests, setBlinkRequests] = useState<BlinkRequest[]>([]);
@@ -27,7 +28,6 @@ export const App: React.FC = () => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isPanicOpen, setIsPanicOpen] = useState(false);
 
-  // Parse invite link on load (e.g. /#room=849201&key=...)
   useEffect(() => {
     const hash = window.location.hash;
     if (hash && hash.includes('room=')) {
@@ -43,11 +43,10 @@ export const App: React.FC = () => {
           timerSeconds: 30,
           isBurnOnRead: false,
           secretKey: key || undefined,
-          peerHandle: 'SecretPeer',
+          peerHandle: 'Peer',
           peerAvatarId: 4,
         };
         setActiveRoom(room);
-        // Clear hash from URL for privacy
         window.history.replaceState(null, '', window.location.pathname);
       }
     }
@@ -111,7 +110,21 @@ export const App: React.FC = () => {
     setActiveRoom(null);
   };
 
-  // If inside active chat room, show full screen ChatView
+  const getTabTitle = () => {
+    switch (activeTab) {
+      case 'chats':
+        return 'Messages';
+      case 'radar':
+        return 'People Nearby';
+      case 'vault':
+        return 'Secret Room';
+      case 'profile':
+        return 'Settings';
+      default:
+        return 'Blink';
+    }
+  };
+
   if (activeRoom) {
     return (
       <>
@@ -129,25 +142,16 @@ export const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#05070d] text-slate-100 flex flex-col font-sans select-none">
-      {/* App Header */}
+    <div className="min-h-screen bg-black text-white flex flex-col font-sans select-none">
       <Navbar
         user={currentUser}
+        title={getTabTitle()}
         onOpenSearch={() => setIsSearchOpen(true)}
-        onOpenProfile={() => setIsProfileOpen(true)}
+        onNewChat={() => setActiveTab('vault')}
         onPanic={handleTriggerPanic}
       />
 
-      {/* Main Tab Content */}
       <main className="flex-1 overflow-y-auto">
-        {activeTab === 'radar' && (
-          <RadarView
-            currentUser={currentUser}
-            onUpdateUser={handleUpdateProfile}
-            onStartChatWithUser={handleStartChatWithUser}
-          />
-        )}
-
         {activeTab === 'chats' && (
           <ChatsListView
             activeRooms={activeRoomsList}
@@ -156,7 +160,15 @@ export const App: React.FC = () => {
             onAcceptRequest={handleAcceptRequest}
             onDeclineRequest={handleDeclineRequest}
             onClearRoom={handleClearRoom}
-            onNavigateRadar={() => setActiveTab('radar')}
+            onNewChat={() => setActiveTab('vault')}
+          />
+        )}
+
+        {activeTab === 'radar' && (
+          <RadarView
+            currentUser={currentUser}
+            onUpdateUser={handleUpdateProfile}
+            onStartChatWithUser={handleStartChatWithUser}
           />
         )}
 
@@ -171,10 +183,10 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'profile' && (
-          <div className="pb-24 pt-4 px-4 max-w-lg mx-auto">
+          <div className="pb-24 pt-4 px-4 max-w-md mx-auto">
             <ProfileModal
               isOpen={true}
-              onClose={() => setActiveTab('radar')}
+              onClose={() => setActiveTab('chats')}
               currentUser={currentUser}
               onSave={handleUpdateProfile}
             />
@@ -182,14 +194,12 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Bottom Floating Navigation */}
       <BottomNav
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}
         unreadCount={blinkRequests.length}
       />
 
-      {/* Modals */}
       <SearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
