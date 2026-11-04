@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Copy, Check, RefreshCw, ArrowRight, ShieldCheck, KeyRound } from 'lucide-react';
 import { ChatRoom, UserProfile } from '../types';
-import { CryptoService } from '../services/crypto';
 import { sound } from '../services/sound';
+import { StorageService } from '../services/storage';
+import { supabase } from '../services/network';
 
 interface SecretVaultViewProps {
   currentUser: UserProfile;
@@ -15,44 +16,25 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
   onEnterRoom,
 }) => {
   const [mode, setMode] = useState<'create' | 'join'>('create');
-  const initialCode = CryptoService.generateRoomCode();
-  const [createdRoom, setCreatedRoom] = useState<ChatRoom>({
-    id: 'room_' + initialCode,
-    code: initialCode,
-    participantCount: 1,
-    timerSeconds: 30,
-    isBurnOnRead: false,
-    secretKey: 'blink_secure_key_' + Math.random().toString(36).substring(2),
-  });
+  const [myCode, setMyCode] = useState<string>(() => StorageService.getMyRoomCode());
   const [joinCode, setJoinCode] = useState('');
+  const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  const handleGenerateRoom = async () => {
+  const inviteUrl = `https://blinkmsg.app/join/${myCode}`;
+
+  const handleGenerateNewCode = () => {
     sound.vibrate(10);
-    const code = CryptoService.generateRoomCode();
-    try {
-      const { base64Key } = await CryptoService.generateRoomKey();
-      setCreatedRoom({
-        id: 'room_' + code,
-        code,
-        participantCount: 1,
-        timerSeconds: 30,
-        isBurnOnRead: false,
-        secretKey: base64Key,
-      });
-    } catch {
-      setCreatedRoom({
-        id: 'room_' + code,
-        code,
-        participantCount: 1,
-        timerSeconds: 30,
-        isBurnOnRead: false,
-        secretKey: 'key_' + Math.random().toString(36).substring(2),
-      });
-    }
+    const newCode = StorageService.refreshMyRoomCode();
+    setMyCode(newCode);
   };
 
-  const inviteUrl = `https://blinkmsg.app/join/${createdRoom.code}#key=${createdRoom.secretKey || 'e2ee'}`;
+  const handleCopyCode = () => {
+    navigator.clipboard?.writeText(myCode);
+    sound.vibrate(15);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
 
   const handleCopyLink = () => {
     navigator.clipboard?.writeText(inviteUrl);
@@ -61,18 +43,62 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     setTimeout(() => setCopiedLink(false), 2000);
   };
 
+  const handleEnterMyRoom = async () => {
+    sound.playSend();
+    const roomId = `room_${myCode}`;
+
+    if (supabase) {
+      try {
+        await supabase.from('chat_rooms').upsert({
+          id: roomId,
+          code: myCode,
+          timer_seconds: 30,
+          is_burn_on_read: false,
+        });
+      } catch (err) {
+        console.warn('Upsert room failed:', err);
+      }
+    }
+
+    const room: ChatRoom = {
+      id: roomId,
+      code: myCode,
+      participantCount: 1,
+      timerSeconds: 30,
+      isBurnOnRead: false,
+      peerHandle: 'Waiting for friend...',
+      peerAvatarId: 2,
+    };
+    onEnterRoom(room);
+  };
+
   const handleJoinByCode = async () => {
     const clean = joinCode.trim().replace(/\D/g, '');
     if (clean.length < 6) return;
 
     sound.playSend();
+    const roomId = `room_${clean}`;
+
+    if (supabase) {
+      try {
+        await supabase.from('chat_rooms').upsert({
+          id: roomId,
+          code: clean,
+          timer_seconds: 30,
+          is_burn_on_read: false,
+        });
+      } catch (err) {
+        console.warn('Upsert room failed:', err);
+      }
+    }
+
     const room: ChatRoom = {
-      id: 'room_' + clean,
+      id: roomId,
       code: clean,
       participantCount: 2,
       timerSeconds: 30,
       isBurnOnRead: false,
-      peerHandle: 'Peer',
+      peerHandle: `Room #${clean}`,
       peerAvatarId: 5,
     };
     onEnterRoom(room);
@@ -85,7 +111,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
           Secret Room
         </h1>
         <p className="text-xs text-zinc-400">
-          Temporary E2E encrypted room. No accounts needed.
+          Share your 6-digit code or enter a friend's code to chat instantly.
         </p>
       </div>
 
@@ -95,17 +121,17 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
           onClick={() => { sound.vibrate(6); setMode('create'); }}
           className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
             mode === 'create'
-              ? 'bg-emerald-500 text-black shadow-sm'
+              ? 'bg-[#D4FF00] text-black shadow-sm font-bold'
               : 'text-zinc-400 hover:text-white'
           }`}
         >
-          Create Room (QR)
+          My Room Code
         </button>
         <button
           onClick={() => { sound.vibrate(6); setMode('join'); }}
           className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
             mode === 'join'
-              ? 'bg-emerald-500 text-black shadow-sm'
+              ? 'bg-[#D4FF00] text-black shadow-sm font-bold'
               : 'text-zinc-400 hover:text-white'
           }`}
         >
@@ -113,20 +139,27 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
         </button>
       </div>
 
-      {mode === 'create' && createdRoom && (
+      {mode === 'create' && (
         <div className="rounded-3xl bg-[#121214] border border-white/[0.08] p-5 flex flex-col items-center text-center shadow-2xl">
           {/* Room Code Badge */}
           <div className="flex items-center space-x-2 mb-4">
-            <span className="text-xs text-zinc-400">Room Code:</span>
-            <span className="px-3 py-1 rounded-xl bg-black text-emerald-400 font-mono text-base font-bold tracking-widest border border-emerald-500/30">
-              {createdRoom.code}
+            <span className="text-xs text-zinc-400">Your Code:</span>
+            <span className="px-4 py-1.5 rounded-xl bg-black text-[#D4FF00] font-mono text-xl font-bold tracking-widest border border-[#D4FF00]/40">
+              {myCode}
             </span>
             <button
-              onClick={handleGenerateRoom}
-              className="p-1 rounded-md text-zinc-400 hover:text-white"
-              title="Regenerate"
+              onClick={handleCopyCode}
+              className="p-1.5 rounded-lg bg-white/[0.05] text-zinc-300 hover:text-white active:scale-90"
+              title="Copy Code"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              {copiedCode ? <Check className="w-4 h-4 text-[#D4FF00]" /> : <Copy className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={handleGenerateNewCode}
+              className="p-1.5 rounded-lg bg-white/[0.05] text-zinc-300 hover:text-white active:scale-90"
+              title="Generate New Code"
+            >
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
 
@@ -142,23 +175,24 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
           </div>
 
           <p className="text-xs text-zinc-400 mb-5 max-w-xs leading-relaxed">
-            Scan to join instantly. Decryption keys stay inside the QR code and are never sent to any server.
+            Give this 6-digit code to your friend. As soon as they enter it, you both connect instantly.
           </p>
 
           <div className="w-full space-y-2">
             <button
-              onClick={handleCopyLink}
-              className="w-full py-3 rounded-2xl bg-[#1c1c20] border border-white/[0.08] text-white text-xs font-medium flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
+              onClick={handleEnterMyRoom}
+              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black text-xs font-extrabold flex items-center justify-center space-x-1.5 active:scale-95 transition-transform shadow-[0_0_15px_rgba(212,255,0,0.3)]"
             >
-              {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-              <span>{copiedLink ? 'Link Copied' : 'Copy Private Invite Link'}</span>
+              <KeyRound className="w-4 h-4" />
+              <span>Enter Room & Start Chat</span>
             </button>
 
             <button
-              onClick={() => onEnterRoom(createdRoom)}
-              className="w-full py-3 rounded-2xl bg-emerald-500 text-black text-xs font-bold flex items-center justify-center active:scale-95 transition-transform shadow-md"
+              onClick={handleCopyLink}
+              className="w-full py-3 rounded-2xl bg-[#1c1c20] border border-white/[0.08] text-white text-xs font-medium flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
             >
-              Enter Room Now
+              {copiedLink ? <Check className="w-4 h-4 text-[#D4FF00]" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedLink ? 'Link Copied!' : 'Copy Shareable Link'}</span>
             </button>
           </div>
         </div>
@@ -166,8 +200,8 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
       {mode === 'join' && (
         <div className="rounded-3xl bg-[#121214] border border-white/[0.08] p-5 shadow-2xl">
-          <label className="block text-xs font-semibold text-zinc-300 mb-2 uppercase tracking-wider">
-            Enter 6-Digit Room Code
+          <label className="block text-xs font-semibold text-zinc-300 mb-2 uppercase tracking-wider text-center">
+            Enter 6-Digit Code
           </label>
 
           <input
@@ -175,22 +209,28 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
             maxLength={6}
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, ''))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && joinCode.trim().length === 6) {
+                handleJoinByCode();
+              }
+            }}
             placeholder="000000"
-            className="w-full py-3.5 px-4 rounded-2xl bg-black border border-white/10 text-center font-mono text-2xl tracking-[0.3em] text-emerald-400 placeholder-zinc-700 outline-none mb-4 shadow-inner"
+            autoFocus
+            className="w-full py-4 px-4 rounded-2xl bg-black border border-white/10 text-center font-mono text-3xl tracking-[0.3em] text-[#D4FF00] placeholder-zinc-700 outline-none mb-4 shadow-inner focus:border-[#D4FF00]/50"
           />
 
           <button
             onClick={handleJoinByCode}
-            disabled={joinCode.length < 6}
-            className="w-full py-3 rounded-2xl bg-emerald-500 text-black font-bold text-xs flex items-center justify-center space-x-1 disabled:opacity-30 active:scale-95 transition-all shadow-md"
+            disabled={joinCode.trim().length < 6}
+            className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black font-extrabold text-xs flex items-center justify-center space-x-1 disabled:opacity-30 active:scale-95 transition-all shadow-[0_0_15px_rgba(212,255,0,0.3)]"
           >
-            <span>Connect & Decrypt Room</span>
+            <span>Connect & Chat Now</span>
             <ArrowRight className="w-4 h-4 ml-1" />
           </button>
 
           <div className="mt-5 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center space-x-2 text-zinc-400 text-xs">
-            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Rooms are purged immediately once both participants leave.</span>
+            <ShieldCheck className="w-4 h-4 text-[#D4FF00] shrink-0" />
+            <span>Messages self-destruct. Nothing is permanently stored.</span>
           </div>
         </div>
       )}

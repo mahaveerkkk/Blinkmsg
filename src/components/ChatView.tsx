@@ -61,10 +61,28 @@ export const ChatView: React.FC<ChatViewProps> = ({
     };
     setMessages([initialNotice]);
 
+    // Load existing active messages from Supabase
+    NetworkService.fetchRoomMessages(room.id).then((savedMsgs) => {
+      if (savedMsgs && savedMsgs.length > 0) {
+        setMessages((prev) => {
+          const map = new Map<string, ChatMessage>();
+          prev.forEach((m) => map.set(m.id, m));
+          savedMsgs.forEach((m) => {
+            if (!map.has(m.id)) map.set(m.id, m);
+          });
+          return Array.from(map.values());
+        });
+      }
+    });
+
     const unsubscribe = NetworkService.subscribeToRoom(room.id, {
       onMessage: (incoming: any) => {
-        sound.playReceive();
-        setMessages((prev) => [...prev, incoming]);
+        if (!incoming || !incoming.id) return;
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === incoming.id)) return prev;
+          sound.playReceive();
+          return [...prev, incoming];
+        });
       },
       onTyping: (typingHandle: string) => {
         if (typingHandle !== currentUser.handle) {
@@ -72,6 +90,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           typingTimeoutRef.current = setTimeout(() => setPeerTyping(false), 2000);
         }
+      },
+      onReaction: (data) => {
+        if (!data || !data.msgId) return;
+        setMessages((prev) =>
+          prev.map((m) => (m.id === data.msgId ? { ...m, reaction: data.reaction } : m))
+        );
+      },
+      onBurnReveal: (data) => {
+        if (!data || !data.msgId) return;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === data.msgId ? { ...m, isRevealed: true, expiresAt: data.expiresAt } : m
+          )
+        );
       },
     });
 
@@ -129,7 +161,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
     setMessages((prev) => [...prev, newMsg]);
     setInputText('');
-    NetworkService.broadcastMessage(room.id, newMsg);
+    NetworkService.broadcastMessage(room.id, newMsg, room.code);
   };
 
   const handleTyping = (text: string) => {
@@ -139,17 +171,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   const handleRevealBurnOnRead = (msgId: string) => {
     sound.vibrate(15);
+    const expiresAt = Date.now() + 6000;
     setMessages((prev) =>
       prev.map((m) =>
         m.id === msgId
           ? {
               ...m,
               isRevealed: true,
-              expiresAt: Date.now() + 6000, // 6s countdown once opened
+              expiresAt,
             }
           : m
       )
     );
+    NetworkService.broadcastBurnReveal(room.id, msgId, expiresAt);
   };
 
   return (

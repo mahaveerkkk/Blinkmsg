@@ -3,6 +3,7 @@ import { CryptoService } from './crypto';
 
 const STORAGE_KEY = 'blinkmsg_user_v2';
 const ROOMS_KEY = 'blinkmsg_active_rooms';
+const MY_ROOM_CODE_KEY = 'blinkmsg_my_room_code';
 
 const GHOST_NAMES = [
   'ShadowFalcon', 'CyberPhantom', 'SilentPulse', 'NeonSpecter', 
@@ -73,6 +74,29 @@ export class StorageService {
     } catch {
       // ignore
     }
+  }
+
+  static getMyRoomCode(): string {
+    try {
+      let code = localStorage.getItem(MY_ROOM_CODE_KEY);
+      if (!code || code.length !== 6 || !/^\d{6}$/.test(code)) {
+        code = CryptoService.generateRoomCode();
+        localStorage.setItem(MY_ROOM_CODE_KEY, code);
+      }
+      return code;
+    } catch {
+      return CryptoService.generateRoomCode();
+    }
+  }
+
+  static refreshMyRoomCode(): string {
+    const code = CryptoService.generateRoomCode();
+    try {
+      localStorage.setItem(MY_ROOM_CODE_KEY, code);
+    } catch {
+      // ignore
+    }
+    return code;
   }
 
   static getRooms(): ChatRoom[] {

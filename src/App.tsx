@@ -3,6 +3,7 @@ import { UserProfile, ChatRoom, ActiveTab, BlinkRequest } from './types';
 import { StorageService } from './services/storage';
 import { CryptoService } from './services/crypto';
 import { sound } from './services/sound';
+import { NetworkService, supabase } from './services/network';
 import { BottomNav } from './components/BottomNav';
 import { RadarView } from './components/RadarView';
 import { SecretVaultView } from './components/SecretVaultView';
@@ -20,13 +21,28 @@ export const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState<boolean>(!StorageService.getProfile());
   const [activeTab, setActiveTab] = useState<ActiveTab>('chats');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
-  const [activeRoomsList, setActiveRoomsList] = useState<ChatRoom[]>([]);
+  const [activeRoomsList, setActiveRoomsList] = useState<ChatRoom[]>(() =>
+    StorageService.getRooms()
+  );
   const [blinkRequests, setBlinkRequests] = useState<BlinkRequest[]>([]);
 
   // Modals
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPanicOpen, setIsPanicOpen] = useState(false);
 
+  // Sync rooms list to localStorage
+  useEffect(() => {
+    StorageService.saveRooms(activeRoomsList);
+  }, [activeRoomsList]);
+
+  // Sync profile to Supabase on startup
+  useEffect(() => {
+    if (currentUser) {
+      NetworkService.syncProfileToSupabase(currentUser);
+    }
+  }, [currentUser?.handle]);
+
+  // Deep-link join handling (e.g. /#room=123456)
   useEffect(() => {
     const hash = window.location.hash;
     if (hash && hash.includes('room=')) {
@@ -45,39 +61,77 @@ export const App: React.FC = () => {
           peerHandle: 'Peer',
           peerAvatarId: 4,
         };
+        setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
         setActiveRoom(room);
         window.history.replaceState(null, '', window.location.pathname);
       }
     }
   }, []);
 
+  // Background sync for incoming direct messages (e.g. when someone messages @currentUser)
+  useEffect(() => {
+    if (!currentUser?.handle) return;
+
+    const syncDMs = async () => {
+      const dmRooms = await NetworkService.fetchUserDirectMessages(currentUser.handle);
+      if (dmRooms.length > 0) {
+        setActiveRoomsList((prev) => {
+          let updated = false;
+          const map = new Map<string, ChatRoom>();
+          prev.forEach((r) => map.set(r.id, r));
+          dmRooms.forEach((r) => {
+            if (!map.has(r.id)) {
+              map.set(r.id, r);
+              updated = true;
+            }
+          });
+          return updated ? Array.from(map.values()) : prev;
+        });
+      }
+    };
+
+    syncDMs();
+    const interval = setInterval(syncDMs, 3000);
+    return () => clearInterval(interval);
+  }, [currentUser?.handle]);
+
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
     if (!currentUser) return;
     const next = { ...currentUser, ...updated };
     setCurrentUser(next);
     StorageService.saveProfile(next);
+    NetworkService.syncProfileToSupabase(next);
   };
 
   const handleStartChatWithUser = async (target: UserProfile) => {
-    const code = CryptoService.generateRoomCode();
-    let base64Key = 'key_' + Math.random().toString(36).substring(2);
-    try {
-      const gen = await CryptoService.generateRoomKey();
-      base64Key = gen.base64Key;
-    } catch {
-      // fallback
-    }
+    if (!currentUser) return;
+
+    // Deterministic room ID between both users: dm_alice__bob
+    const sorted = [currentUser.handle.toLowerCase(), target.handle.toLowerCase()].sort();
+    const dmRoomId = `dm_${sorted[0]}__${sorted[1]}`;
 
     const room: ChatRoom = {
-      id: 'room_' + code,
-      code,
+      id: dmRoomId,
+      code: 'DIRECT',
       participantCount: 2,
       timerSeconds: 30,
       isBurnOnRead: false,
-      secretKey: base64Key,
       peerHandle: target.handle,
       peerAvatarId: target.avatarId,
     };
+
+    if (supabase) {
+      try {
+        await supabase.from('chat_rooms').upsert({
+          id: dmRoomId,
+          code: 'DIRECT',
+          timer_seconds: 30,
+          is_burn_on_read: false,
+        });
+      } catch (err) {
+        console.warn('Upsert direct room error:', err);
+      }
+    }
 
     setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
     setActiveRoom(room);
@@ -95,7 +149,7 @@ export const App: React.FC = () => {
     };
 
     setBlinkRequests((prev) => prev.filter((r) => r.id !== req.id));
-    setActiveRoomsList((prev) => [room, ...prev]);
+    setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
     setActiveRoom(room);
   };
 
@@ -123,6 +177,7 @@ export const App: React.FC = () => {
         onComplete={(user) => {
           setCurrentUser(user);
           setShowSplash(false);
+          NetworkService.syncProfileToSupabase(user);
         }}
       />
     );
