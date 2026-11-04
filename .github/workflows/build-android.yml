@@ -1,0 +1,70 @@
+name: Build BlinkMsg Android AAB & APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    name: Build Android Release Bundle (.aab & .apk)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Node Dependencies
+        run: npm ci || npm install --legacy-peer-deps
+
+      - name: Build Web Production Assets
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Enable Android FLAG_SECURE (Screenshot Blocker)
+        run: |
+          MAIN_ACTIVITY="android/app/src/main/java/com/blinkmsg/app/MainActivity.java"
+          if [ -f "$MAIN_ACTIVITY" ]; then
+            sed -i '/public class MainActivity extends BridgeActivity {/a \    @Override\n    protected void onCreate(android.os.Bundle savedInstanceState) {\n        super.onCreate(savedInstanceState);\n        getWindow().setFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE, android.view.WindowManager.LayoutParams.FLAG_SECURE);\n    }' "$MAIN_ACTIVITY"
+          fi
+
+      - name: Grant Execute Permission to Gradle
+        run: |
+          cd android
+          chmod +x gradlew
+
+      - name: Build Android Release AAB & APK
+        run: |
+          cd android
+          ./gradlew bundleRelease assembleRelease
+
+      - name: Upload Play Store AAB Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlinkMsg-PlayStore-Release-AAB
+          path: android/app/build/outputs/bundle/release/*.aab
+
+      - name: Upload Direct Test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlinkMsg-Test-Release-APK
+          path: android/app/build/outputs/apk/release/*.apk

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00ffaa" stop-opacity="0.3"/>
+      <stop offset="70%" stop-color="#00f0ff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#05070d" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="neonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00ffaa"/>
+      <stop offset="50%" stop-color="#00f0ff"/>
+      <stop offset="100%" stop-color="#7928ca"/>
+    </linearGradient>
+    <filter id="glowEffect" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="512" height="512" rx="128" fill="#05070d"/>
+  <rect width="512" height="512" rx="128" fill="url(#bgGlow)"/>
+
+  <!-- Outer Cyber Ring -->
+  <circle cx="256" cy="256" r="190" stroke="url(#neonGradient)" stroke-width="4" stroke-dasharray="16 12" opacity="0.6"/>
+  <circle cx="256" cy="256" r="160" stroke="#1f293d" stroke-width="3" />
+
+  <!-- The Eye / Blink Eyelid Curves -->
+  <path d="M 110 256 C 160 170, 352 170, 402 256 C 352 342, 160 342, 110 256 Z" 
+        stroke="url(#neonGradient)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none" filter="url(#glowEffect)"/>
+
+  <!-- Glowing Iris with Shutter / Ghost Shield -->
+  <circle cx="256" cy="256" r="64" fill="#0d111a" stroke="#00ffaa" stroke-width="8"/>
+  <circle cx="256" cy="256" r="28" fill="url(#neonGradient)"/>
+  
+  <!-- Disappearing Particle Sparks -->
+  <circle cx="370" cy="190" r="6" fill="#00ffaa" filter="url(#glowEffect)"/>
+  <circle cx="395" cy="215" r="4" fill="#00f0ff"/>
+  <circle cx="140" cy="315" r="5" fill="#ff007f" filter="url(#glowEffect)"/>
+  
+  <!-- Subtle Flash Lightning -->
+  <path d="M 264 210 L 244 260 L 268 260 L 248 302" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
