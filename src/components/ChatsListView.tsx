@@ -47,14 +47,17 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
   onTriggerPanic,
 }) => {
   return (
-    <div className="pb-28 max-w-md mx-auto select-none bg-black min-h-screen text-white">
+    <div className="pb-28 max-w-md mx-auto select-none bg-[#090A0D] min-h-screen text-white relative">
+      {/* Ambient background glow */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-80 h-64 bg-[#D4FF00]/[0.02] blur-[100px] pointer-events-none" />
+
       {/* Clean Header */}
-      <header className="sticky top-0 z-40 bg-black/95 backdrop-blur-xl px-4 py-3.5 flex items-center justify-between border-b border-white/[0.08]">
+      <header className="sticky top-0 z-40 bg-[#0B0C10]/95 backdrop-blur-2xl px-4 py-3.5 flex items-center justify-between border-b border-white/[0.08] shadow-md">
         <div>
-          <h1 className="font-bold text-2xl tracking-tight text-white">
+          <h1 className="font-extrabold text-2xl tracking-tight text-white">
             Messages
           </h1>
-          <p className="text-xs text-[#D4FF00] font-mono font-semibold">
+          <p className="text-xs text-[#D4FF00] font-mono font-bold mt-0.5">
             @{currentUser.handle}
           </p>
         </div>
@@ -62,7 +65,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
         <div className="flex items-center space-x-2">
           <button
             onClick={onTriggerPanic}
-            className="px-2.5 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold active:scale-90 transition-all flex items-center space-x-1"
+            className="px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold active:scale-90 transition-all flex items-center space-x-1.5 hover:bg-red-500/20"
             title="Panic Purge"
           >
             <Shield className="w-3.5 h-3.5 text-red-400" />
@@ -75,9 +78,9 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
       <div className="px-4 py-3">
         <div
           onClick={onOpenSearch}
-          className="w-full bg-[#12151B] border border-white/[0.08] hover:border-white/20 rounded-2xl px-4 py-2.5 flex items-center space-x-2.5 cursor-pointer text-zinc-400 transition-all shadow-inner"
+          className="w-full bg-[#15171F] border border-white/[0.08] hover:border-[#D4FF00]/30 rounded-2xl px-4 py-3 flex items-center space-x-2.5 cursor-pointer text-zinc-400 transition-all shadow-inner group"
         >
-          <Search className="w-4 h-4 text-zinc-400" />
+          <Search className="w-4 h-4 text-zinc-400 group-hover:text-[#D4FF00] transition-colors" />
           <span className="text-xs font-medium text-zinc-400">
             Search users by @handle...
           </span>

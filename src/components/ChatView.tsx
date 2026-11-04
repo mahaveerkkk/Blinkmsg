@@ -11,7 +11,6 @@ import {
   ArrowUp,
   ShieldCheck,
   Camera,
-  Smile,
   AlertTriangle,
 } from 'lucide-react';
 import { ChatMessage, ChatRoom, UserProfile } from '../types';
@@ -58,13 +57,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    // Initial encrypted handshake notice
+    // Initial encrypted notice
     const initialNotice: ChatMessage = {
       id: 'sys_' + Date.now(),
       roomId: room.id,
       senderId: 'system',
       senderHandle: 'System',
-      text: `Messages are end-to-end encrypted and disappear after ${isBurnOnRead ? 'reading' : `${currentTimer}s`}.`,
+      text: `Messages are end-to-end encrypted and self-destruct after ${isBurnOnRead ? 'reading' : `${currentTimer}s`}.`,
       createdAt: Date.now(),
       timerSeconds: 15,
       expiresAt: Date.now() + 15000,
@@ -371,35 +370,43 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-black text-white select-none">
-      {/* Top Header (Signal / Telegram Style) */}
-      <header className="px-3 py-2.5 bg-black/95 backdrop-blur-xl border-b border-white/[0.08] flex items-center justify-between shrink-0 z-30">
-        <div className="flex items-center space-x-2 min-w-0">
+    <div className="flex flex-col h-[100dvh] bg-[#090A0D] text-white select-none relative overflow-hidden font-sans">
+      {/* Ambient background glow for visual depth */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#D4FF00]/[0.025] blur-[120px] pointer-events-none" />
+
+      {/* Top Header (Luxury Signal / iOS Glass Style) */}
+      <header className="px-3.5 py-2.5 bg-[#0B0C10]/90 backdrop-blur-2xl border-b border-white/[0.08] flex items-center justify-between shrink-0 z-30 shadow-md">
+        <div className="flex items-center space-x-2.5 min-w-0">
           <button
             onClick={onLeaveRoom}
-            className="p-1.5 -ml-1 text-zinc-400 hover:text-white active:scale-90 transition-all rounded-full shrink-0"
+            className="p-1.5 -ml-1 text-zinc-400 hover:text-white active:scale-90 transition-all rounded-full hover:bg-white/[0.06] shrink-0"
           >
             <ChevronLeft className="w-6 h-6" />
           </button>
 
-          <Avatar
-            avatarId={peerAvatarId}
-            size="sm"
-            name={peerHandle || room.code}
-            isOnline={true}
-          />
+          <div className="relative shrink-0">
+            <Avatar
+              avatarId={peerAvatarId}
+              size="sm"
+              name={peerHandle || room.code}
+              isOnline={true}
+            />
+            <span className="w-2.5 h-2.5 rounded-full bg-[#D4FF00] border-2 border-black absolute -bottom-0.5 -right-0.5" />
+          </div>
 
-          <div className="min-w-0 pr-2">
+          <div className="min-w-0 pr-1">
             <div className="flex items-center space-x-1.5">
-              <h2 className="font-semibold text-[15px] text-white truncate leading-tight">
+              <h2 className="font-bold text-[15px] text-white truncate leading-tight tracking-tight">
                 {peerHandle && peerHandle !== 'Waiting for friend...'
                   ? `@${peerHandle}`
                   : `Room #${room.code}`}
               </h2>
-              <Lock className="w-3 h-3 text-[#D4FF00] shrink-0" />
+              <span className="px-1.5 py-0.5 rounded bg-[#D4FF00]/10 text-[#D4FF00] text-[9px] font-mono font-bold border border-[#D4FF00]/30 shrink-0">
+                E2EE
+              </span>
             </div>
-            <p className="text-[11px] text-[#D4FF00] font-mono leading-tight">
-              E2E Encrypted • {isBurnOnRead ? 'Burn on read' : `${currentTimer}s`}
+            <p className="text-[11px] text-zinc-400 truncate leading-tight mt-0.5 font-medium">
+              {isBurnOnRead ? '🔥 Burn on read' : `⏱️ Disappears in ${currentTimer}s`}
             </p>
           </div>
         </div>
@@ -409,7 +416,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowTimerMenu(!showTimerMenu)}
-              className="px-2.5 py-1.5 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] text-xs text-zinc-200 flex items-center space-x-1.5 active:scale-95 transition-all shadow-sm"
+              className="px-2.5 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.08] text-xs text-zinc-200 flex items-center space-x-1.5 active:scale-95 transition-all shadow-sm"
               title="Disappearing Timer"
             >
               {isBurnOnRead ? (
@@ -424,14 +431,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
             {/* Timer Dropdown */}
             {showTimerMenu && (
-              <div className="absolute right-0 top-11 w-44 rounded-2xl bg-[#18181c] border border-white/10 shadow-2xl p-1 z-50 animate-pop-in">
+              <div className="absolute right-0 top-11 w-44 rounded-2xl bg-[#16181F] border border-white/10 shadow-2xl p-1 z-50 animate-pop-in">
                 {TIMER_OPTIONS.map((opt) => (
                   <button
                     key={opt.label}
                     onClick={() => handleSetTimer(opt.value, opt.isBurn)}
                     className="w-full text-left px-3 py-2 rounded-xl text-xs hover:bg-white/[0.08] flex items-center justify-between text-zinc-200 transition-colors"
                   >
-                    <span>{opt.label}</span>
+                    <span className="font-medium">{opt.label}</span>
                     {((opt.isBurn && isBurnOnRead) ||
                       (!opt.isBurn && !isBurnOnRead && currentTimer === opt.value)) && (
                       <Check className="w-3.5 h-3.5 text-[#D4FF00]" />
@@ -447,7 +454,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               sound.playPanic();
               onLeaveRoom();
             }}
-            className="p-2 rounded-full text-zinc-400 hover:text-red-400 active:scale-90 transition-all"
+            className="p-2 rounded-full text-zinc-400 hover:text-red-400 active:scale-90 transition-all hover:bg-red-500/10"
             title="Leave & Purge"
           >
             <Trash2 className="w-4 h-4" />
@@ -464,7 +471,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       )}
 
       {/* Messages Canvas */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto px-3.5 py-4 space-y-3 z-10">
         {messages.map((msg) => {
           const isMe = msg.senderId === currentUser.id;
           const isSystem = msg.senderId === 'system';
@@ -472,8 +479,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
           if (isSystem) {
             return (
               <div key={msg.id} className="flex justify-center my-3">
-                <span className="px-3.5 py-1.5 rounded-full bg-white/[0.05] border border-white/[0.06] text-[11px] text-zinc-400 text-center max-w-xs flex items-center space-x-1.5 shadow-sm">
-                  <ShieldCheck className="w-3 h-3 text-[#D4FF00] shrink-0" />
+                <span className="px-3.5 py-1.5 rounded-full bg-white/[0.04] backdrop-blur-md border border-white/[0.06] text-[11px] text-zinc-400 text-center max-w-xs flex items-center space-x-1.5 shadow-sm font-medium">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#D4FF00] shrink-0" />
                   <span>{msg.text}</span>
                 </span>
               </div>
@@ -486,26 +493,26 @@ export const ChatView: React.FC<ChatViewProps> = ({
           return (
             <div
               key={msg.id}
-              className={`relative flex flex-col ${isMe ? 'items-end' : 'items-start'} group transition-opacity duration-300`}
+              className={`relative flex flex-col ${isMe ? 'items-end' : 'items-start'} group transition-all duration-200`}
             >
               <div
                 onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)}
-                className={`relative max-w-[82%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed shadow-sm cursor-pointer ${
+                className={`relative max-w-[82%] px-3.5 py-2.5 text-[14.5px] leading-[1.42] tracking-[-0.01em] shadow-md cursor-pointer transition-transform active:scale-[0.99] ${
                   isMe
-                    ? 'bg-[#152e22] text-white border border-[#D4FF00]/25 rounded-br-[4px]'
-                    : 'bg-[#18181b] text-zinc-100 border border-white/[0.06] rounded-bl-[4px]'
+                    ? 'bg-gradient-to-br from-[#0e4230] via-[#0b3325] to-[#08261c] text-white border border-[#25D366]/25 shadow-emerald-950/40 rounded-[20px] rounded-br-[4px]'
+                    : 'bg-gradient-to-br from-[#1a1c24] to-[#121319] text-[#ececf1] border border-white/[0.08] shadow-black/50 rounded-[20px] rounded-bl-[4px]'
                 }`}
               >
                 {/* Ephemeral Photo Bubble */}
                 {msg.mediaUrl && (
-                  <div className="mb-2 rounded-xl overflow-hidden max-w-[260px]">
+                  <div className="mb-2 rounded-xl overflow-hidden max-w-[260px] shadow-inner">
                     {msg.isBurnOnRead && !msg.isRevealed && !isMe ? (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           handleRevealBurnOnRead(msg.id);
                         }}
-                        className="w-full h-36 bg-black/80 flex flex-col items-center justify-center p-4 border border-amber-500/20 rounded-xl text-center active:scale-95 transition-transform"
+                        className="w-full h-36 bg-black/80 flex flex-col items-center justify-center p-4 border border-amber-500/30 rounded-xl text-center active:scale-95 transition-transform"
                       >
                         <Flame className="w-7 h-7 text-amber-400 mb-1.5 fill-amber-400 animate-pulse" />
                         <span className="text-xs font-bold text-amber-300">Tap to View Photo</span>
@@ -521,60 +528,62 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   </div>
                 )}
 
-                {/* Burn On Read Shield */}
+                {/* Burn On Read Shield Cover */}
                 {msg.isBurnOnRead && !msg.isRevealed && !isMe && !msg.mediaUrl ? (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleRevealBurnOnRead(msg.id);
                     }}
-                    className="flex items-center space-x-2 py-1.5 px-3 rounded-xl bg-black/50 text-amber-300 text-xs font-semibold active:scale-95 transition-transform border border-amber-500/20"
+                    className="w-full p-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-black/40 to-amber-500/10 border border-amber-500/30 flex items-center space-x-2.5 text-left active:scale-95 transition-transform"
                   >
-                    <Eye className="w-4 h-4 text-amber-400" />
-                    <span>Tap to view (Burns in 6s)</span>
+                    <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
+                      <Flame className="w-4 h-4 text-amber-400 fill-amber-400 animate-pulse" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-amber-200">Confidential Message</p>
+                      <p className="text-[10px] text-amber-400/80">Tap to view (burns in 6s)</p>
+                    </div>
+                    <Eye className="w-4 h-4 text-amber-400 shrink-0" />
                   </button>
                 ) : (
-                  msg.text && <p className="break-words whitespace-pre-wrap">{msg.text}</p>
+                  <div className="break-words">
+                    <span>{msg.text}</span>
+                    {/* Inline Telegram-style timestamp & status */}
+                    <span className="inline-flex items-center space-x-1 float-right ml-2.5 mt-1 -mb-0.5 select-none text-[10.5px] font-mono text-zinc-400/80">
+                      {msg.expiresAt > 0 && (!msg.isBurnOnRead || msg.isRevealed) && (
+                        <span className="text-[#D4FF00] font-semibold">
+                          ⏱{timeLeftSec}s
+                        </span>
+                      )}
+
+                      {msg.isBurnOnRead && !msg.isRevealed && (
+                        <span className="flex items-center text-amber-400 font-bold">
+                          <Flame className="w-2.5 h-2.5 fill-current mr-0.5" />
+                          burn
+                        </span>
+                      )}
+
+                      {isMe && (
+                        <span className="inline-block translate-y-[1px]">
+                          {msg.status === 'sent' && (
+                            <Check className="w-3 h-3 text-zinc-400" />
+                          )}
+                          {msg.status === 'delivered' && (
+                            <CheckCheck className="w-3 h-3 text-zinc-400" />
+                          )}
+                          {msg.status === 'read' && (
+                            <CheckCheck className="w-3.5 h-3.5 text-[#D4FF00]" />
+                          )}
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 )}
-
-                {/* Footer Time & Timer Status */}
-                <div
-                  className={`flex items-center justify-end space-x-1.5 mt-1.5 text-[10px] ${
-                    isMe ? 'text-[#D4FF00]/70' : 'text-zinc-500'
-                  }`}
-                >
-                  {(!msg.isBurnOnRead || msg.isRevealed) && msg.expiresAt > 0 && (
-                    <span className="font-mono font-medium">
-                      ⏱ {timeLeftSec}s
-                    </span>
-                  )}
-
-                  {msg.isBurnOnRead && !msg.isRevealed && (
-                    <span className="flex items-center text-amber-400 font-bold">
-                      <Flame className="w-2.5 h-2.5 fill-current mr-0.5" />
-                      burn
-                    </span>
-                  )}
-
-                  {/* Read Receipts */}
-                  {isMe && (
-                    <span title={msg.status}>
-                      {msg.status === 'sent' && (
-                        <Check className="w-3.5 h-3.5 text-zinc-400" />
-                      )}
-                      {msg.status === 'delivered' && (
-                        <CheckCheck className="w-3.5 h-3.5 text-zinc-400" />
-                      )}
-                      {msg.status === 'read' && (
-                        <CheckCheck className="w-3.5 h-3.5 text-[#D4FF00]" />
-                      )}
-                    </span>
-                  )}
-                </div>
 
                 {/* Emoji Reaction Badge on Message Corner */}
                 {msg.reaction && (
-                  <div className="absolute -bottom-2 -right-1 px-1.5 py-0.5 rounded-full bg-[#1e2024] border border-white/10 text-xs shadow-md animate-pop-in">
+                  <div className="absolute -bottom-2.5 right-2 px-1.5 py-0.5 rounded-full bg-[#181920] border border-white/10 text-xs shadow-md animate-pop-in">
                     {msg.reaction}
                   </div>
                 )}
@@ -584,7 +593,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               {activeReactionMsgId === msg.id && (
                 <div
                   onClick={(e) => e.stopPropagation()}
-                  className={`flex items-center space-x-1 mt-1 p-1 rounded-full bg-[#18181c] border border-white/10 shadow-xl z-10 animate-pop-in ${
+                  className={`flex items-center space-x-1.5 mt-1.5 p-1 rounded-full bg-[#161820] border border-white/10 shadow-2xl z-20 animate-pop-in ${
                     isMe ? 'mr-1' : 'ml-1'
                   }`}
                 >
@@ -592,7 +601,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     <button
                       key={emoji}
                       onClick={() => handleSelectReaction(msg.id, emoji)}
-                      className="w-7 h-7 flex items-center justify-center text-sm hover:scale-125 active:scale-95 transition-transform"
+                      className="w-7 h-7 flex items-center justify-center text-sm hover:scale-125 active:scale-90 transition-transform"
                     >
                       {emoji}
                     </button>
@@ -606,15 +615,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
         {peerTyping && (
           <div className="flex items-center space-x-1.5 text-xs text-zinc-400 pl-2">
             <span className="w-1.5 h-1.5 rounded-full bg-[#D4FF00] animate-pulse" />
-            <span className="font-mono text-[11px]">@{peerHandle || 'friend'} is typing...</span>
+            <span className="font-mono text-[11px] text-[#D4FF00]">@{peerHandle || 'friend'} is typing...</span>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Floating Bottom Input Bar */}
-      <div className="p-3 bg-black/95 border-t border-white/[0.08] pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
+      {/* Floating Bottom Input Bar (iOS / Telegram Style) */}
+      <div className="p-3 bg-[#0A0B0E]/95 backdrop-blur-2xl border-t border-white/[0.08] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20">
         <div className="flex items-center space-x-2 max-w-lg mx-auto">
           {/* Hidden File Input for Ephemeral Photos */}
           <input
@@ -627,25 +636,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 rounded-full bg-white/[0.05] hover:bg-white/[0.1] text-zinc-400 hover:text-white active:scale-90 transition-all shrink-0"
-            title="Send Ephemeral Photo"
+            className="w-10 h-10 rounded-full bg-[#15171F] hover:bg-[#1E202B] border border-white/[0.08] text-zinc-400 hover:text-white flex items-center justify-center active:scale-90 transition-all shrink-0 shadow-sm"
+            title="Send Confidential Photo"
           >
             <Camera className="w-5 h-5 text-zinc-300" />
           </button>
 
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => handleTyping(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-            placeholder="Message (burns automatically)"
-            className="flex-1 bg-[#18181b] border border-white/[0.08] focus:border-[#D4FF00]/40 rounded-full px-4 py-3 text-[15px] text-white placeholder-zinc-500 outline-none transition-all shadow-inner"
-          />
+          <div className="flex-1 bg-[#15171F] border border-white/[0.08] focus-within:border-[#D4FF00]/40 rounded-full px-4 py-2 flex items-center transition-all shadow-inner">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => handleTyping(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              placeholder="Confidential message..."
+              className="w-full bg-transparent text-[14.5px] text-white placeholder-zinc-500 outline-none"
+            />
+          </div>
 
           <button
             onClick={() => handleSendMessage()}
             disabled={!inputText.trim()}
-            className="w-11 h-11 rounded-full bg-[#D4FF00] text-black flex items-center justify-center font-bold disabled:opacity-20 active:scale-95 transition-all shadow-md shrink-0"
+            className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all duration-200 active:scale-90 shrink-0 ${
+              inputText.trim()
+                ? 'bg-[#D4FF00] text-black shadow-[0_0_15px_rgba(212,255,0,0.35)] scale-100 cursor-pointer'
+                : 'bg-[#15171F] text-zinc-600 border border-white/[0.06] scale-95 opacity-50 cursor-not-allowed'
+            }`}
           >
             <ArrowUp className="w-5 h-5 stroke-[2.5]" />
           </button>
