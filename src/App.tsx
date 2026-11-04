@@ -22,7 +22,7 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('chats');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
   const [activeRoomsList, setActiveRoomsList] = useState<ChatRoom[]>(() =>
-    StorageService.getRooms()
+    StorageService.getProfile() ? StorageService.getRooms(StorageService.getProfile()!.handle) : []
   );
   const [blinkRequests, setBlinkRequests] = useState<BlinkRequest[]>([]);
 
@@ -30,10 +30,21 @@ export const App: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPanicOpen, setIsPanicOpen] = useState(false);
 
-  // Sync rooms list to localStorage
+  // When user switches or logs in, load only that user's rooms
   useEffect(() => {
-    StorageService.saveRooms(activeRoomsList);
-  }, [activeRoomsList]);
+    if (currentUser?.handle) {
+      setActiveRoomsList(StorageService.getRooms(currentUser.handle));
+    } else {
+      setActiveRoomsList([]);
+    }
+  }, [currentUser?.handle]);
+
+  // Sync rooms list to user-scoped localStorage
+  useEffect(() => {
+    if (currentUser?.handle) {
+      StorageService.saveRooms(activeRoomsList, currentUser.handle);
+    }
+  }, [activeRoomsList, currentUser?.handle]);
 
   // Sync profile to Supabase on startup
   useEffect(() => {
@@ -175,6 +186,7 @@ export const App: React.FC = () => {
     return (
       <SplashScreen
         onComplete={(user) => {
+          setActiveRoomsList(StorageService.getRooms(user.handle));
           setCurrentUser(user);
           setShowSplash(false);
           NetworkService.syncProfileToSupabase(user);
@@ -255,6 +267,9 @@ export const App: React.FC = () => {
             currentUser={currentUser}
             onSave={handleUpdateProfile}
             onResetAccount={() => {
+              StorageService.clearAll(currentUser?.handle);
+              setActiveRoomsList([]);
+              setActiveRoom(null);
               setCurrentUser(null);
               setShowSplash(true);
             }}

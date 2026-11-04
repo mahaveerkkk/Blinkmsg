@@ -99,27 +99,43 @@ export class StorageService {
     return code;
   }
 
-  static getRooms(): ChatRoom[] {
+  static getRoomsKey(userHandle?: string): string {
+    return userHandle ? `blinkmsg_rooms_${userHandle.toLowerCase()}` : ROOMS_KEY;
+  }
+
+  static getRooms(userHandle?: string): ChatRoom[] {
     try {
-      const data = localStorage.getItem(ROOMS_KEY);
+      const key = StorageService.getRoomsKey(userHandle);
+      const data = localStorage.getItem(key);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
     }
   }
 
-  static saveRooms(rooms: ChatRoom[]): void {
+  static saveRooms(rooms: ChatRoom[], userHandle?: string): void {
     try {
-      localStorage.setItem(ROOMS_KEY, JSON.stringify(rooms));
+      const key = StorageService.getRoomsKey(userHandle);
+      localStorage.setItem(key, JSON.stringify(rooms));
     } catch {
       // ignore
     }
   }
 
-  static clearAll(): void {
+  static clearAll(userHandle?: string): void {
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(MY_ROOM_CODE_KEY);
       localStorage.removeItem(ROOMS_KEY);
+      if (userHandle) {
+        localStorage.removeItem(StorageService.getRoomsKey(userHandle));
+      }
+      // Purge any stored room lists across handles
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith('blinkmsg_')) {
+          localStorage.removeItem(key);
+        }
+      });
       sessionStorage.clear();
     } catch {
       // ignore
