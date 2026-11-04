@@ -191,6 +191,20 @@ export const App: React.FC = () => {
           room={activeRoom}
           currentUser={currentUser}
           onLeaveRoom={() => setActiveRoom(null)}
+          onPeerConnected={(peerHandle, peerAvatarId) => {
+            setActiveRoomsList((prev) =>
+              prev.map((r) =>
+                r.id === activeRoom.id
+                  ? { ...r, peerHandle, peerAvatarId }
+                  : r
+              )
+            );
+            setActiveRoom((prev) =>
+              prev && prev.id === activeRoom.id
+                ? { ...prev, peerHandle, peerAvatarId }
+                : prev
+            );
+          }}
         />
         <PanicModal
           isOpen={isPanicOpen}

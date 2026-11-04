@@ -97,6 +97,10 @@ export interface RoomSubscriptionCallbacks {
   onTyping?: (userHandle: string) => void;
   onReaction?: (data: { msgId: string; reaction?: string }) => void;
   onBurnReveal?: (data: { msgId: string; expiresAt: number }) => void;
+  onTimerChange?: (data: { timerSeconds: number; isBurnOnRead: boolean; setByHandle: string }) => void;
+  onPeerJoin?: (data: { handle: string; avatarId: number }) => void;
+  onDeliveryAck?: (data: { msgId: string; status: 'delivered' | 'read' }) => void;
+  onScreenshotAlert?: (data: { handle: string }) => void;
 }
 
 export class NetworkService {
@@ -156,6 +160,30 @@ export class NetworkService {
         }
       });
 
+      ch.on('broadcast', { event: 'timer_change' }, ({ payload }) => {
+        if (callbacks.onTimerChange && payload) {
+          callbacks.onTimerChange(payload);
+        }
+      });
+
+      ch.on('broadcast', { event: 'peer_join' }, ({ payload }) => {
+        if (callbacks.onPeerJoin && payload) {
+          callbacks.onPeerJoin(payload);
+        }
+      });
+
+      ch.on('broadcast', { event: 'delivery_ack' }, ({ payload }) => {
+        if (callbacks.onDeliveryAck && payload?.msgId) {
+          callbacks.onDeliveryAck(payload);
+        }
+      });
+
+      ch.on('broadcast', { event: 'screenshot_alert' }, ({ payload }) => {
+        if (callbacks.onScreenshotAlert && payload?.handle) {
+          callbacks.onScreenshotAlert(payload);
+        }
+      });
+
       ch.subscribe((status) => {
         console.log(`[Supabase Channel ${channelName}] Status:`, status);
       });
@@ -171,6 +199,10 @@ export class NetworkService {
         else if (data.type === 'typing' && callbacks.onTyping) callbacks.onTyping(data.handle);
         else if (data.type === 'reaction' && callbacks.onReaction) callbacks.onReaction(data);
         else if (data.type === 'burn_reveal' && callbacks.onBurnReveal) callbacks.onBurnReveal(data);
+        else if (data.type === 'timer_change' && callbacks.onTimerChange) callbacks.onTimerChange(data);
+        else if (data.type === 'peer_join' && callbacks.onPeerJoin) callbacks.onPeerJoin(data);
+        else if (data.type === 'delivery_ack' && callbacks.onDeliveryAck) callbacks.onDeliveryAck(data);
+        else if (data.type === 'screenshot_alert' && callbacks.onScreenshotAlert) callbacks.onScreenshotAlert(data);
       };
       bc.addEventListener('message', bcListener);
 
@@ -197,6 +229,14 @@ export class NetworkService {
         callbacks.onReaction({ msgId: data.msgId, reaction: data.reaction });
       } else if (data.type === 'burn_reveal' && callbacks.onBurnReveal) {
         callbacks.onBurnReveal({ msgId: data.msgId, expiresAt: data.expiresAt });
+      } else if (data.type === 'timer_change' && callbacks.onTimerChange) {
+        callbacks.onTimerChange(data);
+      } else if (data.type === 'peer_join' && callbacks.onPeerJoin) {
+        callbacks.onPeerJoin(data);
+      } else if (data.type === 'delivery_ack' && callbacks.onDeliveryAck) {
+        callbacks.onDeliveryAck(data);
+      } else if (data.type === 'screenshot_alert' && callbacks.onScreenshotAlert) {
+        callbacks.onScreenshotAlert(data);
       }
     };
 
@@ -359,6 +399,122 @@ export class NetworkService {
   }
 
   /**
+   * Broadcast room timer change (Signal style room sync)
+   */
+  static async broadcastTimerChange(
+    roomId: string,
+    timerSeconds: number,
+    isBurnOnRead: boolean,
+    setByHandle: string
+  ) {
+    const normId = normalizeRoomId(roomId);
+    const payload = { timerSeconds, isBurnOnRead, setByHandle };
+
+    if (supabase) {
+      // Update room in DB
+      supabase
+        .from('chat_rooms')
+        .update({ timer_seconds: timerSeconds, is_burn_on_read: isBurnOnRead })
+        .eq('id', normId)
+        .then();
+
+      const ch = activeSupabaseChannels.get(normId);
+      if (ch) {
+        ch.send({
+          type: 'broadcast',
+          event: 'timer_change',
+          payload,
+        }).catch(() => {});
+      }
+    }
+
+    try {
+      const bc = NetworkService.getBroadcastChannel(normId);
+      bc.postMessage({ type: 'timer_change', ...payload });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Handshake when entering room to let peer discover our handle and avatar
+   */
+  static async broadcastPeerJoin(roomId: string, handle: string, avatarId: number) {
+    const normId = normalizeRoomId(roomId);
+    const payload = { handle, avatarId };
+
+    if (supabase) {
+      const ch = activeSupabaseChannels.get(normId);
+      if (ch) {
+        ch.send({
+          type: 'broadcast',
+          event: 'peer_join',
+          payload,
+        }).catch(() => {});
+      }
+    }
+
+    try {
+      const bc = NetworkService.getBroadcastChannel(normId);
+      bc.postMessage({ type: 'peer_join', ...payload });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Broadcast read / delivery acknowledgement (single tick -> double tick)
+   */
+  static async broadcastDeliveryAck(roomId: string, msgId: string, status: 'delivered' | 'read') {
+    const normId = normalizeRoomId(roomId);
+    const payload = { msgId, status };
+
+    if (supabase) {
+      const ch = activeSupabaseChannels.get(normId);
+      if (ch) {
+        ch.send({
+          type: 'broadcast',
+          event: 'delivery_ack',
+          payload,
+        }).catch(() => {});
+      }
+    }
+
+    try {
+      const bc = NetworkService.getBroadcastChannel(normId);
+      bc.postMessage({ type: 'delivery_ack', ...payload });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Broadcast screenshot detection alert
+   */
+  static async broadcastScreenshotAlert(roomId: string, handle: string) {
+    const normId = normalizeRoomId(roomId);
+    const payload = { handle };
+
+    if (supabase) {
+      const ch = activeSupabaseChannels.get(normId);
+      if (ch) {
+        ch.send({
+          type: 'broadcast',
+          event: 'screenshot_alert',
+          payload,
+        }).catch(() => {});
+      }
+    }
+
+    try {
+      const bc = NetworkService.getBroadcastChannel(normId);
+      bc.postMessage({ type: 'screenshot_alert', ...payload });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
    * Fetches active, unexpired messages for a room from Supabase
    */
   static async fetchRoomMessages(roomId: string): Promise<ChatMessage[]> {
@@ -447,6 +603,10 @@ export class NetworkService {
         const peerHandle = parts[0]?.toLowerCase() === cleanHandle ? parts[1] : parts[0];
 
         if (peerHandle) {
+          const previewText = row.encrypted_payload?.startsWith('data:image')
+            ? '📸 Ephemeral Photo'
+            : row.encrypted_payload || '';
+
           roomMap.set(roomId, {
             id: roomId,
             code: 'DM',
@@ -455,6 +615,8 @@ export class NetworkService {
             isBurnOnRead: row.is_burn_on_read || false,
             peerHandle,
             peerAvatarId: 3,
+            lastMessageText: previewText,
+            lastMessageTime: new Date(row.created_at).getTime(),
           });
         }
       }

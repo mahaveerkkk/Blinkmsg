@@ -60,6 +60,9 @@ export interface ChatRoom {
   peerHandle?: string;
   peerAvatarId?: number;
   peerStatus?: 'online' | 'offline' | 'typing';
+  lastMessageText?: string;
+  lastMessageTime?: number;
+  unreadCount?: number;
 }
 
 export interface BlinkRequest {

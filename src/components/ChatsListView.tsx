@@ -23,6 +23,17 @@ interface ChatsListViewProps {
   onTriggerPanic: () => void;
 }
 
+function formatTimeAgo(timestamp?: number): string {
+  if (!timestamp) return '';
+  const diffSec = Math.floor((Date.now() - timestamp) / 1000);
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h`;
+  return `${Math.floor(diffHr / 24)}d`;
+}
+
 export const ChatsListView: React.FC<ChatsListViewProps> = ({
   currentUser,
   activeRooms,
@@ -128,30 +139,37 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                 className="p-3 rounded-2xl hover:bg-[#121214] active:bg-[#18181c] transition-all flex items-center justify-between cursor-pointer border-b border-white/[0.04] last:border-0"
               >
                 <div className="flex items-center space-x-3 min-w-0 pr-2">
-                  <Avatar
-                    avatarId={room.peerAvatarId || 3}
-                    size="md"
-                    name={room.peerHandle}
-                    isOnline={true}
-                  />
+                  <div className="relative">
+                    <Avatar
+                      avatarId={room.peerAvatarId || 3}
+                      size="md"
+                      name={room.peerHandle || room.code}
+                      isOnline={true}
+                    />
+                    {room.unreadCount && room.unreadCount > 0 && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-[#D4FF00] rounded-full ring-2 ring-black" />
+                    )}
+                  </div>
 
                   <div className="min-w-0">
                     <div className="flex items-center space-x-1.5">
                       <h4 className="font-semibold text-sm text-white truncate">
-                        {room.peerHandle ? `@${room.peerHandle}` : `Room #${room.code}`}
+                        {room.peerHandle && room.peerHandle !== 'Waiting for friend...'
+                          ? `@${room.peerHandle}`
+                          : `Room #${room.code}`}
                       </h4>
                       <Lock className="w-3 h-3 text-[#D4FF00] shrink-0" />
                     </div>
 
                     <p className="text-xs text-zinc-400 truncate mt-0.5">
-                      {room.isBurnOnRead ? '🔥 Burn on read' : `⏱️ Disappears in ${room.timerSeconds}s`}
+                      {room.lastMessageText || (room.isBurnOnRead ? '🔥 Burn on read' : `⏱️ Disappears in ${room.timerSeconds}s`)}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-2 shrink-0">
                   <span className="text-[10px] text-zinc-500 font-mono">
-                    #{room.code}
+                    {room.lastMessageTime ? formatTimeAgo(room.lastMessageTime) : `#${room.code}`}
                   </span>
 
                   <button
