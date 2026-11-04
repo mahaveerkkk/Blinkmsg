@@ -98,7 +98,7 @@ export interface RoomSubscriptionCallbacks {
   onReaction?: (data: { msgId: string; reaction?: string }) => void;
   onBurnReveal?: (data: { msgId: string; expiresAt: number }) => void;
   onTimerChange?: (data: { timerSeconds: number; isBurnOnRead: boolean; setByHandle: string }) => void;
-  onPeerJoin?: (data: { handle: string; avatarId: number }) => void;
+  onPeerJoin?: (data: { handle: string; displayName?: string; avatarId: number }) => void;
   onDeliveryAck?: (data: { msgId: string; status: 'delivered' | 'read' }) => void;
   onScreenshotAlert?: (data: { handle: string }) => void;
 }
@@ -296,7 +296,7 @@ export class NetworkService {
           ? new Date(payload.expiresAt).toISOString()
           : new Date(Date.now() + 86400000).toISOString(); // 24h default for burn-on-read waiting
 
-        await supabase.from('ephemeral_messages').insert({
+        const insertRow: any = {
           room_id: normId,
           sender_id: payload.senderId,
           sender_handle: payload.senderHandle,
@@ -305,7 +305,14 @@ export class NetworkService {
           timer_seconds: payload.timerSeconds || 30,
           is_burn_on_read: payload.isBurnOnRead || false,
           expires_at: expiresAtIso,
-        });
+        };
+
+        // If payload.id is a standard UUID, insert it directly to guarantee matching IDs between peers
+        if (payload.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.id)) {
+          insertRow.id = payload.id;
+        }
+
+        await supabase.from('ephemeral_messages').insert(insertRow);
       } catch (err) {
         console.warn('Supabase DB message insert failed:', err);
       }
@@ -437,21 +444,33 @@ export class NetworkService {
   }
 
   /**
-   * Handshake when entering room to let peer discover our handle and avatar
+   * Handshake when entering room to let peer discover our name, handle and avatar
    */
-  static async broadcastPeerJoin(roomId: string, handle: string, avatarId: number) {
+  static async broadcastPeerJoin(
+    roomId: string,
+    handle: string,
+    displayName?: string,
+    avatarId?: number
+  ) {
     const normId = normalizeRoomId(roomId);
-    const payload = { handle, avatarId };
+    const payload = {
+      handle,
+      displayName: displayName || handle,
+      avatarId: avatarId || 1,
+    };
 
     if (supabase) {
-      const ch = activeSupabaseChannels.get(normId);
-      if (ch) {
-        ch.send({
-          type: 'broadcast',
-          event: 'peer_join',
-          payload,
-        }).catch(() => {});
+      let ch = activeSupabaseChannels.get(normId);
+      if (!ch) {
+        ch = supabase.channel(normId, { config: { broadcast: { self: false } } });
+        ch.subscribe();
+        activeSupabaseChannels.set(normId, ch);
       }
+      ch.send({
+        type: 'broadcast',
+        event: 'peer_join',
+        payload,
+      }).catch(() => {});
     }
 
     try {
@@ -463,21 +482,26 @@ export class NetworkService {
   }
 
   /**
-   * Broadcast read / delivery acknowledgement (single tick -> double tick)
+   * Broadcast read / delivery acknowledgement (single tick -> double tick -> double neon tick)
    */
   static async broadcastDeliveryAck(roomId: string, msgId: string, status: 'delivered' | 'read') {
     const normId = normalizeRoomId(roomId);
     const payload = { msgId, status };
 
     if (supabase) {
-      const ch = activeSupabaseChannels.get(normId);
-      if (ch) {
-        ch.send({
-          type: 'broadcast',
-          event: 'delivery_ack',
-          payload,
-        }).catch(() => {});
+      let ch = activeSupabaseChannels.get(normId);
+      if (!ch) {
+        ch = supabase.channel(normId, { config: { broadcast: { self: false } } });
+        ch.subscribe();
+        activeSupabaseChannels.set(normId, ch);
       }
+      ch.send({
+        type: 'broadcast',
+        event: 'delivery_ack',
+        payload,
+      }).catch((err) => {
+        console.warn('Realtime delivery ack broadcast failed:', err);
+      });
     }
 
     try {

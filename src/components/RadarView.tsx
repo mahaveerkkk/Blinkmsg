@@ -113,11 +113,11 @@ export const RadarView: React.FC<RadarViewProps> = ({
               className="rounded-2xl bg-[#121214] border border-white/[0.08] p-3 flex items-center justify-between"
             >
               <div className="flex items-center space-x-3 min-w-0 pr-2">
-                <Avatar avatarId={target.avatarId} size="md" isOnline={true} name={target.handle} />
+                <Avatar avatarId={target.avatarId} size="md" isOnline={true} name={target.displayName || target.handle} />
 
                 <div className="min-w-0">
                   <h3 className="font-semibold text-white text-sm truncate">
-                    @{target.handle}
+                    {target.displayName || target.handle}
                   </h3>
                   <p className="text-xs text-zinc-400 truncate mt-0.5">
                     {target.vibe}

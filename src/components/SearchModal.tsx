@@ -113,13 +113,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               className="p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.04] flex items-center justify-between transition-colors"
             >
               <div className="flex items-center space-x-3 min-w-0 pr-2">
-                <Avatar avatarId={user.avatarId} size="md" isOnline={true} name={user.handle} />
+                <Avatar avatarId={user.avatarId} size="md" isOnline={true} name={user.displayName || user.handle} />
                 <div className="min-w-0">
                   <h4 className="font-semibold text-sm text-white truncate">
-                    @{user.handle}
+                    {user.displayName || user.handle}
                   </h4>
                   <p className="text-xs text-zinc-400 truncate">
-                    {user.vibe}
+                    {user.vibe || user.city}
                   </p>
                 </div>
               </div>

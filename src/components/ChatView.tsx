@@ -22,8 +22,19 @@ interface ChatViewProps {
   room: ChatRoom;
   currentUser: UserProfile;
   onLeaveRoom: () => void;
-  onPeerConnected?: (peerHandle: string, peerAvatarId: number) => void;
+  onPeerConnected?: (peerHandle: string, peerDisplayName: string, peerAvatarId: number) => void;
 }
+
+const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
 const TIMER_OPTIONS = [
   { label: '🔥 Burn on Read', value: 0, isBurn: true },
@@ -48,6 +59,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [showTimerMenu, setShowTimerMenu] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
   const [peerHandle, setPeerHandle] = useState(room.peerHandle || '');
+  const [peerDisplayName, setPeerDisplayName] = useState(room.peerDisplayName || '');
   const [peerAvatarId, setPeerAvatarId] = useState(room.peerAvatarId || 3);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
   const [screenshotToast, setScreenshotToast] = useState<string | null>(null);
@@ -72,8 +84,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
     };
     setMessages([initialNotice]);
 
-    // Broadcast our join presence so peer receives our @handle & avatar
-    NetworkService.broadcastPeerJoin(room.id, currentUser.handle, currentUser.avatarId);
+    // Broadcast our join presence so peer receives our name, handle & avatar
+    NetworkService.broadcastPeerJoin(
+      room.id,
+      currentUser.handle,
+      currentUser.displayName,
+      currentUser.avatarId
+    );
 
     // Load existing active messages from Supabase
     NetworkService.fetchRoomMessages(room.id).then((savedMsgs) => {
@@ -85,6 +102,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
             if (!map.has(m.id)) map.set(m.id, m);
           });
           return Array.from(map.values());
+        });
+
+        // Send delivery or read ack back to sender for fetched messages
+        savedMsgs.forEach((msg) => {
+          if (msg.senderHandle !== currentUser.handle && msg.senderId !== currentUser.id) {
+            const ackStatus = msg.isBurnOnRead && !msg.isRevealed ? 'delivered' : 'read';
+            NetworkService.broadcastDeliveryAck(room.id, msg.id, ackStatus);
+          }
         });
       }
     });
@@ -99,14 +124,24 @@ export const ChatView: React.FC<ChatViewProps> = ({
           return [...prev, incoming];
         });
 
-        // Send delivery ack back to sender
-        NetworkService.broadcastDeliveryAck(room.id, incoming.id, 'delivered');
+        // Send delivery ack back to sender:
+        // If burn-on-read and not revealed yet, send 'delivered'.
+        // If normal message, it's visible right now -> send 'read'!
+        const ackStatus = incoming.isBurnOnRead && !incoming.isRevealed ? 'delivered' : 'read';
+        NetworkService.broadcastDeliveryAck(room.id, incoming.id, ackStatus);
 
-        // Resolve peer handle if generic
+        // Resolve peer handle and displayName
         if (incoming.senderHandle && incoming.senderHandle !== currentUser.handle) {
           setPeerHandle(incoming.senderHandle);
+          if (incoming.senderDisplayName) {
+            setPeerDisplayName(incoming.senderDisplayName);
+          }
           if (onPeerConnected) {
-            onPeerConnected(incoming.senderHandle, peerAvatarId);
+            onPeerConnected(
+              incoming.senderHandle,
+              incoming.senderDisplayName || incoming.senderHandle,
+              peerAvatarId
+            );
           }
         }
       },
@@ -136,9 +171,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
         setIsBurnOnRead(data.isBurnOnRead);
         sound.playReceive();
 
+        const setterName = (data.setByHandle === currentUser.handle)
+          ? 'You'
+          : (peerDisplayName || data.setByHandle.replace(/^@/, ''));
+
         const noticeText = data.isBurnOnRead
-          ? `@${data.setByHandle} enabled Burn-on-read for this room.`
-          : `@${data.setByHandle} set message timer to ${data.timerSeconds}s.`;
+          ? `${setterName} enabled Burn-on-read for this room.`
+          : `${setterName} set message timer to ${data.timerSeconds}s.`;
 
         const notice: ChatMessage = {
           id: 'sys_' + Date.now(),
@@ -157,15 +196,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
       onPeerJoin: (peer) => {
         if (peer.handle && peer.handle !== currentUser.handle) {
           setPeerHandle(peer.handle);
+          if (peer.displayName) setPeerDisplayName(peer.displayName);
           setPeerAvatarId(peer.avatarId || 3);
           sound.playReceive();
 
+          const cleanPeerName = peer.displayName || peer.handle.replace(/^@/, '');
           const notice: ChatMessage = {
             id: 'sys_' + Date.now(),
             roomId: room.id,
             senderId: 'system',
             senderHandle: 'System',
-            text: `@${peer.handle} connected to the room.`,
+            text: `${cleanPeerName} connected to the room.`,
             createdAt: Date.now(),
             timerSeconds: 15,
             expiresAt: Date.now() + 15000,
@@ -175,19 +216,27 @@ export const ChatView: React.FC<ChatViewProps> = ({
           setMessages((prev) => [...prev, notice]);
 
           if (onPeerConnected) {
-            onPeerConnected(peer.handle, peer.avatarId || 3);
+            onPeerConnected(peer.handle, cleanPeerName, peer.avatarId || 3);
           }
         }
       },
       onDeliveryAck: (data) => {
+        if (!data || !data.msgId) return;
         setMessages((prev) =>
-          prev.map((m) => (m.id === data.msgId ? { ...m, status: data.status } : m))
+          prev.map((m) => {
+            if (m.id === data.msgId) {
+              if (m.status === 'read' && data.status === 'delivered') return m;
+              return { ...m, status: data.status };
+            }
+            return m;
+          })
         );
       },
       onScreenshotAlert: (data) => {
         if (data.handle !== currentUser.handle) {
           sound.playPanic();
-          setScreenshotToast(`⚠️ @${data.handle} attempted screenshot or switched window!`);
+          const cleanName = peerDisplayName || data.handle.replace(/^@/, '');
+          setScreenshotToast(`⚠️ ${cleanName} attempted screenshot or switched window!`);
           setTimeout(() => setScreenshotToast(null), 4000);
         }
       },
@@ -258,10 +307,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const expiresAt = isBurnOnRead ? 0 : Date.now() + currentTimer * 1000;
 
     const newMsg: ChatMessage = {
-      id: 'msg_' + Math.random().toString(36).substring(2, 9),
+      id: generateUUID(),
       roomId: room.id,
       senderId: currentUser.id,
       senderHandle: currentUser.handle,
+      senderDisplayName: currentUser.displayName,
       text: textToSend || (mediaUrl ? '📸 Photo' : ''),
       mediaUrl,
       createdAt: Date.now(),
@@ -388,7 +438,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             <Avatar
               avatarId={peerAvatarId}
               size="sm"
-              name={peerHandle || room.code}
+              name={peerDisplayName || peerHandle || room.code}
               isOnline={true}
             />
             <span className="w-2.5 h-2.5 rounded-full bg-[#D4FF00] border-2 border-black absolute -bottom-0.5 -right-0.5" />
@@ -397,9 +447,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <div className="min-w-0 pr-1">
             <div className="flex items-center space-x-1.5">
               <h2 className="font-bold text-[15px] text-white truncate leading-tight tracking-tight">
-                {peerHandle && peerHandle !== 'Waiting for friend...'
-                  ? `@${peerHandle}`
-                  : `Room #${room.code}`}
+                {peerDisplayName || (peerHandle && peerHandle !== 'Waiting for friend...'
+                  ? peerHandle.replace(/^@/, '')
+                  : `Room #${room.code}`)}
               </h2>
               <span className="px-1.5 py-0.5 rounded bg-[#D4FF00]/10 text-[#D4FF00] text-[9px] font-mono font-bold border border-[#D4FF00]/30 shrink-0">
                 E2EE
@@ -615,7 +665,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
         {peerTyping && (
           <div className="flex items-center space-x-1.5 text-xs text-zinc-400 pl-2">
             <span className="w-1.5 h-1.5 rounded-full bg-[#D4FF00] animate-pulse" />
-            <span className="font-mono text-[11px] text-[#D4FF00]">@{peerHandle || 'friend'} is typing...</span>
+            <span className="font-mono text-[11px] text-[#D4FF00]">
+              {peerDisplayName || (peerHandle ? peerHandle.replace(/^@/, '') : 'Friend')} is typing...
+            </span>
           </div>
         )}
 

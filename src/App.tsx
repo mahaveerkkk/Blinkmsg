@@ -128,6 +128,7 @@ export const App: React.FC = () => {
       timerSeconds: 30,
       isBurnOnRead: false,
       peerHandle: target.handle,
+      peerDisplayName: target.displayName || target.handle,
       peerAvatarId: target.avatarId,
     };
 
@@ -156,6 +157,7 @@ export const App: React.FC = () => {
       timerSeconds: 30,
       isBurnOnRead: false,
       peerHandle: req.fromUser.handle,
+      peerDisplayName: req.fromUser.displayName || req.fromUser.handle,
       peerAvatarId: req.fromUser.avatarId,
     };
 
@@ -203,17 +205,17 @@ export const App: React.FC = () => {
           room={activeRoom}
           currentUser={currentUser}
           onLeaveRoom={() => setActiveRoom(null)}
-          onPeerConnected={(peerHandle, peerAvatarId) => {
+          onPeerConnected={(peerHandle, peerDisplayName, peerAvatarId) => {
             setActiveRoomsList((prev) =>
               prev.map((r) =>
                 r.id === activeRoom.id
-                  ? { ...r, peerHandle, peerAvatarId }
+                  ? { ...r, peerHandle, peerDisplayName: peerDisplayName || r.peerDisplayName, peerAvatarId }
                   : r
               )
             );
             setActiveRoom((prev) =>
               prev && prev.id === activeRoom.id
-                ? { ...prev, peerHandle, peerAvatarId }
+                ? { ...prev, peerHandle, peerDisplayName: peerDisplayName || prev.peerDisplayName, peerAvatarId }
                 : prev
             );
           }}

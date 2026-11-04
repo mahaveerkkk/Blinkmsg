@@ -19,6 +19,7 @@ export interface ChatMessage {
   roomId: string;
   senderId: string;
   senderHandle: string;
+  senderDisplayName?: string;
   text: string;
   mediaUrl?: string; // Encrypted / ephemeral image data URL
   createdAt: number;
@@ -38,6 +39,7 @@ export interface WireMessagePayload {
   roomId: string;
   senderId: string;
   senderHandle: string;
+  senderDisplayName?: string;
   ciphertext: string;
   iv: string;
   createdAt: number;
@@ -58,6 +60,7 @@ export interface ChatRoom {
   isBurnOnRead: boolean;
   secretKey?: string; // Base64 AES-GCM key
   peerHandle?: string;
+  peerDisplayName?: string;
   peerAvatarId?: number;
   peerStatus?: 'online' | 'offline' | 'typing';
   lastMessageText?: string;

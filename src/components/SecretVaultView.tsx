@@ -56,6 +56,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
           timerSeconds: 30,
           isBurnOnRead: false,
           peerHandle: peer.handle,
+          peerDisplayName: peer.displayName || peer.handle,
           peerAvatarId: peer.avatarId || 3,
         };
         onEnterRoom(room);
@@ -70,6 +71,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
           timerSeconds: 30,
           isBurnOnRead: false,
           peerHandle: msg.senderHandle || 'Friend',
+          peerDisplayName: msg.senderDisplayName || msg.senderHandle || 'Friend',
           peerAvatarId: 3,
         };
         onEnterRoom(room);
@@ -149,7 +151,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     }
 
     // Broadcast our join presence so User A's listening screen immediately triggers auto-entry!
-    NetworkService.broadcastPeerJoin(roomId, currentUser.handle, currentUser.avatarId);
+    NetworkService.broadcastPeerJoin(roomId, currentUser.handle, currentUser.displayName, currentUser.avatarId);
 
     const room: ChatRoom = {
       id: roomId,

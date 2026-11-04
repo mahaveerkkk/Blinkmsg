@@ -58,7 +58,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
             Messages
           </h1>
           <p className="text-xs text-[#D4FF00] font-mono font-bold mt-0.5">
-            @{currentUser.handle}
+            {currentUser.displayName || currentUser.handle}
           </p>
         </div>
 
@@ -100,10 +100,10 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                 className="p-3 rounded-2xl bg-[#141416] border border-white/[0.08] flex items-center justify-between"
               >
                 <div className="flex items-center space-x-3">
-                  <Avatar avatarId={req.fromUser.avatarId} size="sm" isOnline={true} name={req.fromUser.handle} />
+                  <Avatar avatarId={req.fromUser.avatarId} size="sm" isOnline={true} name={req.fromUser.displayName || req.fromUser.handle} />
                   <div>
                     <h4 className="font-semibold text-sm text-white">
-                      @{req.fromUser.handle}
+                      {req.fromUser.displayName || req.fromUser.handle}
                     </h4>
                     <p className="text-xs text-zinc-400">
                       Encrypted chat request
@@ -146,7 +146,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                     <Avatar
                       avatarId={room.peerAvatarId || 3}
                       size="md"
-                      name={room.peerHandle || room.code}
+                      name={room.peerDisplayName || room.peerHandle || room.code}
                       isOnline={true}
                     />
                     {room.unreadCount && room.unreadCount > 0 && (
@@ -157,9 +157,9 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                   <div className="min-w-0">
                     <div className="flex items-center space-x-1.5">
                       <h4 className="font-semibold text-sm text-white truncate">
-                        {room.peerHandle && room.peerHandle !== 'Waiting for friend...'
-                          ? `@${room.peerHandle}`
-                          : `Room #${room.code}`}
+                        {room.peerDisplayName || (room.peerHandle && room.peerHandle !== 'Waiting for friend...'
+                          ? room.peerHandle.replace(/^@/, '')
+                          : `Room #${room.code}`)}
                       </h4>
                       <Lock className="w-3 h-3 text-[#D4FF00] shrink-0" />
                     </div>
