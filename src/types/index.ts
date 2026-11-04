@@ -20,14 +20,33 @@ export interface ChatMessage {
   senderId: string;
   senderHandle: string;
   text: string;
+  mediaUrl?: string; // Encrypted / ephemeral image data URL
   createdAt: number;
-  timerSeconds: number; // e.g. 10, 30, 60, 300
-  expiresAt: number; // timestamp when it burns
+  timerSeconds: number; // e.g. 0 (off), 10, 30, 60, 300
+  expiresAt: number; // timestamp when it burns (0 = burn on read waiting for reveal or off)
   isBurnOnRead: boolean;
   isRevealed?: boolean;
   status: MessageStatus;
   reaction?: string;
   isBurning?: boolean; // trigger flame animation
+  ciphertext?: string;
+  iv?: string;
+}
+
+export interface WireMessagePayload {
+  id: string;
+  roomId: string;
+  senderId: string;
+  senderHandle: string;
+  ciphertext: string;
+  iv: string;
+  createdAt: number;
+  timerSeconds: number;
+  expiresAt: number;
+  isBurnOnRead: boolean;
+  status: MessageStatus;
+  reaction?: string;
+  mediaUrl?: string;
 }
 
 export interface ChatRoom {

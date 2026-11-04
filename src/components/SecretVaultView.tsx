@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Key, Copy, Check, RefreshCw, ArrowRight } from 'lucide-react';
+import { Copy, Check, RefreshCw, ArrowRight, ShieldCheck, KeyRound } from 'lucide-react';
 import { ChatRoom, UserProfile } from '../types';
 import { CryptoService } from '../services/crypto';
 import { sound } from '../services/sound';
@@ -70,25 +70,34 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     : '';
 
   return (
-    <div className="pb-24 pt-4 px-4 max-w-md mx-auto select-none">
+    <div className="pb-28 pt-4 px-4 max-w-md mx-auto select-none">
+      <div className="mb-4">
+        <h1 className="font-bold text-2xl tracking-tight text-white">
+          Secret Room
+        </h1>
+        <p className="text-xs text-zinc-400">
+          Temporary E2E encrypted room. No accounts needed.
+        </p>
+      </div>
+
       {/* Mode Switcher */}
-      <div className="flex rounded-xl bg-[#141416] p-1 border border-[#222226] mb-5">
+      <div className="flex rounded-xl bg-[#141416] p-1 border border-white/[0.08] mb-5">
         <button
           onClick={() => { sound.vibrate(6); setMode('create'); }}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
             mode === 'create'
-              ? 'bg-[#27272a] text-white shadow-sm'
-              : 'text-zinc-500 hover:text-zinc-300'
+              ? 'bg-emerald-500 text-black shadow-sm'
+              : 'text-zinc-400 hover:text-white'
           }`}
         >
-          Create Room
+          Create Room (QR)
         </button>
         <button
           onClick={() => { sound.vibrate(6); setMode('join'); }}
-          className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-all ${
+          className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all ${
             mode === 'join'
-              ? 'bg-[#27272a] text-white shadow-sm'
-              : 'text-zinc-500 hover:text-zinc-300'
+              ? 'bg-emerald-500 text-black shadow-sm'
+              : 'text-zinc-400 hover:text-white'
           }`}
         >
           Join with Code
@@ -96,60 +105,60 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
       </div>
 
       {mode === 'create' && createdRoom && (
-        <div className="rounded-2xl bg-[#121214] border border-[#1f1f23] p-5 flex flex-col items-center text-center">
-          {/* Room Code */}
+        <div className="rounded-3xl bg-[#121214] border border-white/[0.08] p-5 flex flex-col items-center text-center shadow-2xl">
+          {/* Room Code Badge */}
           <div className="flex items-center space-x-2 mb-4">
-            <span className="text-xs text-zinc-400">Code:</span>
-            <span className="px-3 py-1 rounded-lg bg-black text-white font-mono text-base font-semibold tracking-wider border border-white/10">
+            <span className="text-xs text-zinc-400">Room Code:</span>
+            <span className="px-3 py-1 rounded-xl bg-black text-emerald-400 font-mono text-base font-bold tracking-widest border border-emerald-500/30">
               {createdRoom.code}
             </span>
             <button
               onClick={handleGenerateRoom}
-              className="p-1 rounded-md text-zinc-500 hover:text-white"
-              title="New code"
+              className="p-1 rounded-md text-zinc-400 hover:text-white"
+              title="Regenerate"
             >
               <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
 
           {/* Clean White QR */}
-          <div className="p-3 bg-white rounded-2xl mb-4">
+          <div className="p-3.5 bg-white rounded-2xl mb-4 shadow-xl">
             <QRCodeSVG
               value={inviteUrl}
-              size={160}
+              size={170}
               bgColor="#ffffff"
               fgColor="#000000"
               level="M"
             />
           </div>
 
-          <p className="text-xs text-zinc-400 mb-5 max-w-xs">
-            Scan to connect. Messages burn automatically and leave zero trace.
+          <p className="text-xs text-zinc-400 mb-5 max-w-xs leading-relaxed">
+            Scan to join instantly. Decryption keys stay inside the QR code and are never sent to any server.
           </p>
 
           <div className="w-full space-y-2">
             <button
               onClick={handleCopyLink}
-              className="w-full py-2.5 rounded-xl bg-[#1a1a1e] border border-white/5 text-zinc-200 text-xs font-medium flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
+              className="w-full py-3 rounded-2xl bg-[#1c1c20] border border-white/[0.08] text-white text-xs font-medium flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
             >
-              {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copiedLink ? 'Link Copied' : 'Copy Invite Link'}</span>
+              {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedLink ? 'Link Copied' : 'Copy Private Invite Link'}</span>
             </button>
 
             <button
               onClick={() => onEnterRoom(createdRoom)}
-              className="w-full py-2.5 rounded-xl bg-white text-black text-xs font-semibold flex items-center justify-center active:scale-95 transition-transform"
+              className="w-full py-3 rounded-2xl bg-emerald-500 text-black text-xs font-bold flex items-center justify-center active:scale-95 transition-transform shadow-md"
             >
-              Enter Room
+              Enter Room Now
             </button>
           </div>
         </div>
       )}
 
       {mode === 'join' && (
-        <div className="rounded-2xl bg-[#121214] border border-[#1f1f23] p-5">
-          <label className="block text-xs font-medium text-zinc-400 mb-2">
-            Enter 6-digit room code
+        <div className="rounded-3xl bg-[#121214] border border-white/[0.08] p-5 shadow-2xl">
+          <label className="block text-xs font-semibold text-zinc-300 mb-2 uppercase tracking-wider">
+            Enter 6-Digit Room Code
           </label>
 
           <input
@@ -158,17 +167,22 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, ''))}
             placeholder="000000"
-            className="w-full py-3 px-4 rounded-xl bg-black border border-white/10 text-center font-mono text-lg tracking-[0.25em] text-white placeholder-zinc-700 outline-none mb-4"
+            className="w-full py-3.5 px-4 rounded-2xl bg-black border border-white/10 text-center font-mono text-2xl tracking-[0.3em] text-emerald-400 placeholder-zinc-700 outline-none mb-4 shadow-inner"
           />
 
           <button
             onClick={handleJoinByCode}
             disabled={joinCode.length < 6}
-            className="w-full py-2.5 rounded-xl bg-white text-black font-semibold text-xs flex items-center justify-center space-x-1 disabled:opacity-30 active:scale-95 transition-all"
+            className="w-full py-3 rounded-2xl bg-emerald-500 text-black font-bold text-xs flex items-center justify-center space-x-1 disabled:opacity-30 active:scale-95 transition-all shadow-md"
           >
-            <span>Join Room</span>
-            <ArrowRight className="w-3.5 h-3.5 ml-1" />
+            <span>Connect & Decrypt Room</span>
+            <ArrowRight className="w-4 h-4 ml-1" />
           </button>
+
+          <div className="mt-5 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center space-x-2 text-zinc-400 text-xs">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>Rooms are purged immediately once both participants leave.</span>
+          </div>
         </div>
       )}
     </div>

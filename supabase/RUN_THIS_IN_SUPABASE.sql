@@ -1,5 +1,5 @@
 -- ========================================================
--- BLINKMSG PRODUCTION DATABASE SETUP
+-- BLINKMSG SECURE DATABASE SCHEMA & REALTIME SETUP
 -- Copy all and paste into Supabase SQL Editor -> Click 'Run'
 -- ========================================================
 
@@ -17,8 +17,8 @@ CREATE TABLE public.profiles (
     handle TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
     avatar_id INT DEFAULT 1,
-    vibe TEXT DEFAULT 'Hey there, I am using BlinkMsg',
-    is_available BOOLEAN DEFAULT FALSE,
+    vibe TEXT DEFAULT '⚡ Ghost mode active',
+    is_available BOOLEAN DEFAULT TRUE,
     city TEXT DEFAULT 'New Delhi',
     country TEXT DEFAULT 'India',
     last_seen TIMESTAMPTZ DEFAULT NOW(),
@@ -27,7 +27,7 @@ CREATE TABLE public.profiles (
 
 -- Index for instant search by @handle
 CREATE INDEX idx_profiles_handle ON public.profiles (handle);
-CREATE INDEX idx_profiles_available ON public.profiles (is_available);
+CREATE INDEX idx_profiles_available ON public.profiles (is_available, city);
 
 -- 4. CHAT ROOMS TABLE
 CREATE TABLE public.chat_rooms (
@@ -41,14 +41,14 @@ CREATE TABLE public.chat_rooms (
 
 CREATE INDEX idx_chat_rooms_code ON public.chat_rooms (code);
 
--- 5. EPHEMERAL MESSAGES TABLE (Encrypted Ciphertext only)
+-- 5. EPHEMERAL MESSAGES TABLE (Hardware AES-256-GCM Ciphertext only)
 CREATE TABLE public.ephemeral_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     room_id TEXT NOT NULL REFERENCES public.chat_rooms(id) ON DELETE CASCADE,
     sender_id TEXT NOT NULL,
     sender_handle TEXT NOT NULL,
-    encrypted_payload TEXT NOT NULL,
-    iv TEXT NOT NULL,
+    encrypted_payload TEXT NOT NULL, -- AES-256-GCM Ciphertext
+    iv TEXT NOT NULL,                -- 96-bit Initialization Vector
     timer_seconds INT DEFAULT 30,
     is_burn_on_read BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -63,30 +63,45 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ephemeral_messages ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public read on profiles" ON public.profiles FOR SELECT USING (true);
-CREATE POLICY "Allow anyone to insert/update profile" ON public.profiles FOR ALL USING (true);
+-- Allow public read on available profiles for Radar discovery
+CREATE POLICY "Public read available profiles" ON public.profiles
+    FOR SELECT USING (is_available = true);
 
-CREATE POLICY "Allow anyone to manage rooms" ON public.chat_rooms FOR ALL USING (true);
-
-CREATE POLICY "Allow read unexpired messages" ON public.ephemeral_messages 
-    FOR SELECT USING (NOW() < expires_at);
-
-CREATE POLICY "Allow insert messages" ON public.ephemeral_messages 
+-- Allow creating / updating own profile
+CREATE POLICY "Public profile upsert" ON public.profiles
     FOR INSERT WITH CHECK (true);
 
-CREATE POLICY "Allow delete messages" ON public.ephemeral_messages 
-    FOR DELETE USING (true);
+CREATE POLICY "Public profile update" ON public.profiles
+    FOR UPDATE USING (true);
 
--- 7. REALTIME REPLICATION (For live instant chat without page refresh)
+-- Rooms can be created and read by code
+CREATE POLICY "Allow public read rooms" ON public.chat_rooms
+    FOR SELECT USING (NOW() < expires_at);
+
+CREATE POLICY "Allow create rooms" ON public.chat_rooms
+    FOR INSERT WITH CHECK (true);
+
+-- Messages: only unexpired messages can be read
+CREATE POLICY "Read unexpired messages" ON public.ephemeral_messages 
+    FOR SELECT USING (NOW() < expires_at);
+
+CREATE POLICY "Insert messages" ON public.ephemeral_messages 
+    FOR INSERT WITH CHECK (true);
+
+-- 7. REALTIME REPLICATION (For live instant chat)
 ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_rooms;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.ephemeral_messages;
 
 -- 8. AUTO-CLEANUP FUNCTION (Deletes expired messages and rooms)
-CREATE OR REPLACE FUNCTION delete_expired_messages()
+CREATE OR REPLACE FUNCTION purge_expired_blinkmsg_data()
 RETURNS void AS $$
 BEGIN
     DELETE FROM public.ephemeral_messages WHERE expires_at <= NOW();
     DELETE FROM public.chat_rooms WHERE expires_at <= NOW();
+    -- Set inactive profiles to unavailable
+    UPDATE public.profiles
+    SET is_available = FALSE
+    WHERE last_seen < (NOW() - INTERVAL '15 minutes');
 END;
 $$ LANGUAGE plpgsql;

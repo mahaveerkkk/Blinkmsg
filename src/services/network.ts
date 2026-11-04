@@ -1,5 +1,5 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { UserProfile, ChatMessage, BlinkRequest } from '../types';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
+import { UserProfile, WireMessagePayload, ChatMessage } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -80,78 +80,193 @@ export const MOCK_RADAR_USERS: UserProfile[] = [
   },
 ];
 
+// Persistent channel registries to prevent memory leaks & port exhaustion
+const activeBroadcastChannels = new Map<string, BroadcastChannel>();
+const activeSupabaseChannels = new Map<string, RealtimeChannel>();
+let lastTypingTime = 0;
+
+export interface RoomSubscriptionCallbacks {
+  onMessage: (payload: WireMessagePayload | ChatMessage) => void;
+  onTyping?: (userHandle: string) => void;
+  onReaction?: (data: { msgId: string; reaction?: string }) => void;
+  onBurnReveal?: (data: { msgId: string; expiresAt: number }) => void;
+}
+
 export class NetworkService {
+  private static getBroadcastChannel(roomId: string): BroadcastChannel {
+    let bc = activeBroadcastChannels.get(roomId);
+    if (!bc) {
+      bc = new BroadcastChannel(`blinkmsg_room_${roomId}`);
+      activeBroadcastChannels.set(roomId, bc);
+    }
+    return bc;
+  }
+
+  private static getSupabaseChannel(roomId: string): RealtimeChannel | null {
+    if (!supabase) return null;
+    let ch = activeSupabaseChannels.get(roomId);
+    if (!ch) {
+      ch = supabase.channel(`room_${roomId}`, {
+        config: { broadcast: { self: false } },
+      });
+      ch.subscribe();
+      activeSupabaseChannels.set(roomId, ch);
+    }
+    return ch;
+  }
+
   /**
-   * Broadcast message over Supabase Realtime channel or local channel
+   * Subscribe to room events (encrypted messages, typing, reaction, burn_reveal)
    */
   static subscribeToRoom(
     roomId: string,
-    onMessage: (msg: ChatMessage) => void,
-    onTyping?: (userHandle: string) => void
-  ) {
-    if (supabase) {
-      const channel = supabase.channel(`room_${roomId}`, {
-        config: { broadcast: { self: false } },
-      });
+    callbacks: RoomSubscriptionCallbacks
+  ): () => void {
+    const { onMessage, onTyping, onReaction, onBurnReveal } = callbacks;
 
-      channel
-        .on('broadcast', { event: 'message' }, ({ payload }) => {
-          onMessage(payload as ChatMessage);
-        })
-        .on('broadcast', { event: 'typing' }, ({ payload }) => {
-          if (onTyping && payload?.handle) {
-            onTyping(payload.handle);
-          }
-        })
-        .subscribe();
+    if (supabase) {
+      const channel = NetworkService.getSupabaseChannel(roomId);
+
+      if (channel) {
+        channel
+          .on('broadcast', { event: 'message' }, ({ payload }) => {
+            onMessage(payload as WireMessagePayload);
+          })
+          .on('broadcast', { event: 'typing' }, ({ payload }) => {
+            if (onTyping && payload?.handle) {
+              onTyping(payload.handle);
+            }
+          })
+          .on('broadcast', { event: 'reaction' }, ({ payload }) => {
+            if (onReaction && payload?.msgId) {
+              onReaction(payload);
+            }
+          })
+          .on('broadcast', { event: 'burn_reveal' }, ({ payload }) => {
+            if (onBurnReveal && payload?.msgId) {
+              onBurnReveal(payload);
+            }
+          });
+      }
 
       return () => {
-        supabase?.removeChannel(channel);
+        if (channel) {
+          supabase.removeChannel(channel);
+          activeSupabaseChannels.delete(roomId);
+        }
       };
     }
 
-    // BroadcastChannel fallback for multi-tab / local testing
-    const bc = new BroadcastChannel(`blinkmsg_room_${roomId}`);
-    bc.onmessage = (event) => {
-      if (event.data?.type === 'message') {
-        onMessage(event.data.payload);
-      } else if (event.data?.type === 'typing' && onTyping) {
-        onTyping(event.data.handle);
+    // Local / multi-tab fallback
+    const bc = NetworkService.getBroadcastChannel(roomId);
+    const listener = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data) return;
+
+      if (data.type === 'message') {
+        onMessage(data.payload);
+      } else if (data.type === 'typing' && onTyping) {
+        onTyping(data.handle);
+      } else if (data.type === 'reaction' && onReaction) {
+        onReaction({ msgId: data.msgId, reaction: data.reaction });
+      } else if (data.type === 'burn_reveal' && onBurnReveal) {
+        onBurnReveal({ msgId: data.msgId, expiresAt: data.expiresAt });
       }
     };
 
+    bc.addEventListener('message', listener);
+
     return () => {
+      bc.removeEventListener('message', listener);
+      // If no other listeners, close channel
       bc.close();
+      activeBroadcastChannels.delete(roomId);
     };
   }
 
-  static async broadcastMessage(roomId: string, message: ChatMessage) {
+  /**
+   * Broadcast an encrypted message over network
+   */
+  static async broadcastMessage(roomId: string, payload: WireMessagePayload | ChatMessage) {
     if (supabase) {
-      const channel = supabase.channel(`room_${roomId}`);
-      await channel.send({
-        type: 'broadcast',
-        event: 'message',
-        payload: message,
-      });
-      return;
+      const ch = NetworkService.getSupabaseChannel(roomId);
+      if (ch) {
+        await ch.send({
+          type: 'broadcast',
+          event: 'message',
+          payload,
+        });
+        return;
+      }
     }
 
-    const bc = new BroadcastChannel(`blinkmsg_room_${roomId}`);
-    bc.postMessage({ type: 'message', payload: message });
+    const bc = NetworkService.getBroadcastChannel(roomId);
+    bc.postMessage({ type: 'message', payload });
   }
 
+  /**
+   * Broadcast typing indicator with 800ms debounce
+   */
   static async broadcastTyping(roomId: string, handle: string) {
+    const now = Date.now();
+    if (now - lastTypingTime < 800) {
+      return; // Debounce typing packets
+    }
+    lastTypingTime = now;
+
     if (supabase) {
-      const channel = supabase.channel(`room_${roomId}`);
-      await channel.send({
-        type: 'broadcast',
-        event: 'typing',
-        payload: { handle },
-      });
-      return;
+      const ch = NetworkService.getSupabaseChannel(roomId);
+      if (ch) {
+        await ch.send({
+          type: 'broadcast',
+          event: 'typing',
+          payload: { handle },
+        });
+        return;
+      }
     }
 
-    const bc = new BroadcastChannel(`blinkmsg_room_${roomId}`);
+    const bc = NetworkService.getBroadcastChannel(roomId);
     bc.postMessage({ type: 'typing', handle });
+  }
+
+  /**
+   * Broadcast message heart / emoji reaction
+   */
+  static async broadcastReaction(roomId: string, msgId: string, reaction?: string) {
+    if (supabase) {
+      const ch = NetworkService.getSupabaseChannel(roomId);
+      if (ch) {
+        await ch.send({
+          type: 'broadcast',
+          event: 'reaction',
+          payload: { msgId, reaction },
+        });
+        return;
+      }
+    }
+
+    const bc = NetworkService.getBroadcastChannel(roomId);
+    bc.postMessage({ type: 'reaction', msgId, reaction });
+  }
+
+  /**
+   * Broadcast burn on read reveal so sender screen self-destructs simultaneously
+   */
+  static async broadcastBurnReveal(roomId: string, msgId: string, expiresAt: number) {
+    if (supabase) {
+      const ch = NetworkService.getSupabaseChannel(roomId);
+      if (ch) {
+        await ch.send({
+          type: 'broadcast',
+          event: 'burn_reveal',
+          payload: { msgId, expiresAt },
+        });
+        return;
+      }
+    }
+
+    const bc = NetworkService.getBroadcastChannel(roomId);
+    bc.postMessage({ type: 'burn_reveal', msgId, expiresAt });
   }
 }

@@ -102,6 +102,12 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleTriggerPanic = () => {
+    sound.playPanic();
+    setIsPanicOpen(true);
+    setActiveRoom(null);
+  };
+
   if (activeRoom) {
     return (
       <>
@@ -132,8 +138,9 @@ export const App: React.FC = () => {
             onClearRoom={handleClearRoom}
             onNewChat={() => setActiveTab('vault')}
             onOpenSearch={() => setIsSearchOpen(true)}
-            onOpenProfile={() => setIsProfileOpen(true)}
-            onStartChatWithUser={handleStartChatWithUser}
+            onOpenVault={() => setActiveTab('vault')}
+            onOpenRadar={() => setActiveTab('radar')}
+            onTriggerPanic={handleTriggerPanic}
           />
         )}
 
@@ -156,7 +163,7 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'profile' && (
-          <div className="pb-24 pt-4 px-4 max-w-md mx-auto">
+          <div className="pb-28 pt-4 px-4 max-w-md mx-auto">
             <ProfileModal
               isOpen={true}
               onClose={() => setActiveTab('chats')}
@@ -167,7 +174,6 @@ export const App: React.FC = () => {
         )}
       </main>
 
-      {/* Instagram Bottom Nav */}
       <BottomNav
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}

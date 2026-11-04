@@ -1,4 +1,5 @@
-import { UserProfile } from '../types';
+import { UserProfile, ChatRoom } from '../types';
+import { CryptoService } from './crypto';
 
 const STORAGE_KEY = 'blinkmsg_ghost_identity';
 const ROOMS_KEY = 'blinkmsg_active_rooms';
@@ -35,7 +36,7 @@ export class StorageService {
     const randomVibe = VIBE_TAGS[Math.floor(Math.random() * VIBE_TAGS.length)];
 
     const profile: UserProfile = {
-      id: 'usr_' + Math.random().toString(36).substring(2, 11),
+      id: CryptoService.generateId('usr'),
       handle,
       displayName: randomName,
       avatarId: Math.floor(Math.random() * 8) + 1,
@@ -54,6 +55,23 @@ export class StorageService {
   static saveProfile(profile: UserProfile): void {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+    } catch {
+      // ignore
+    }
+  }
+
+  static getRooms(): ChatRoom[] {
+    try {
+      const data = localStorage.getItem(ROOMS_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static saveRooms(rooms: ChatRoom[]): void {
+    try {
+      localStorage.setItem(ROOMS_KEY, JSON.stringify(rooms));
     } catch {
       // ignore
     }

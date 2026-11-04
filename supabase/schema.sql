@@ -5,8 +5,13 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. Ghost Profiles (For Radar & @Handle Discovery)
-CREATE TABLE IF NOT EXISTS public.ghost_profiles (
+-- Drop previous tables if recreating
+DROP TABLE IF EXISTS public.ephemeral_messages CASCADE;
+DROP TABLE IF EXISTS public.chat_rooms CASCADE;
+DROP TABLE IF EXISTS public.profiles CASCADE;
+
+-- 1. Profiles Table (For Radar & @Handle Discovery)
+CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     handle TEXT UNIQUE NOT NULL,
     display_name TEXT NOT NULL,
@@ -16,13 +21,13 @@ CREATE TABLE IF NOT EXISTS public.ghost_profiles (
     country TEXT DEFAULT 'India',
     state TEXT DEFAULT 'Delhi',
     city TEXT DEFAULT 'New Delhi',
-    last_active TIMESTAMPTZ DEFAULT NOW(),
+    last_seen TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Index for fast @handle search
-CREATE INDEX IF NOT EXISTS idx_ghost_handle ON public.ghost_profiles (handle);
-CREATE INDEX IF NOT EXISTS idx_ghost_radar ON public.ghost_profiles (is_available, country, city);
+CREATE INDEX IF NOT EXISTS idx_profiles_handle ON public.profiles (handle);
+CREATE INDEX IF NOT EXISTS idx_profiles_radar ON public.profiles (is_available, country, city);
 
 -- 2. Chat Rooms (Ephemeral E2EE Sessions)
 CREATE TABLE IF NOT EXISTS public.chat_rooms (
@@ -55,21 +60,26 @@ CREATE INDEX IF NOT EXISTS idx_msg_expires ON public.ephemeral_messages (expires
 -- ========================================================
 -- Row Level Security (RLS) Policies
 -- ========================================================
-ALTER TABLE public.ghost_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_rooms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ephemeral_messages ENABLE ROW LEVEL SECURITY;
 
--- Allow anonymous reads on available profiles for Radar
-CREATE POLICY "Public radar read" ON public.ghost_profiles
+-- Allow public reads on available profiles for Radar
+CREATE POLICY "Public radar read" ON public.profiles
     FOR SELECT USING (is_available = TRUE);
 
--- Allow anyone to create / update their own profile
-CREATE POLICY "Anyone can upsert profile" ON public.ghost_profiles
-    FOR ALL USING (TRUE);
+CREATE POLICY "Public profile insert" ON public.profiles
+    FOR INSERT WITH CHECK (TRUE);
 
--- Allow anyone to create and read rooms
-CREATE POLICY "Anyone can manage rooms" ON public.chat_rooms
-    FOR ALL USING (TRUE);
+CREATE POLICY "Public profile update" ON public.profiles
+    FOR UPDATE USING (TRUE);
+
+-- Allow reading and creating rooms
+CREATE POLICY "Public room read" ON public.chat_rooms
+    FOR SELECT USING (NOW() < expires_at);
+
+CREATE POLICY "Public room insert" ON public.chat_rooms
+    FOR INSERT WITH CHECK (TRUE);
 
 -- Messages can only be read if not expired
 CREATE POLICY "Read unexpired messages" ON public.ephemeral_messages
@@ -84,20 +94,14 @@ CREATE POLICY "Insert messages" ON public.ephemeral_messages
 CREATE OR REPLACE FUNCTION purge_expired_blinkmsg_data()
 RETURNS void AS $$
 BEGIN
-    -- Delete all expired messages
     DELETE FROM public.ephemeral_messages
     WHERE expires_at <= NOW();
 
-    -- Delete all expired rooms older than 24 hours
     DELETE FROM public.chat_rooms
     WHERE expires_at <= NOW();
 
-    -- Set users to unavailable if inactive for more than 15 minutes
-    UPDATE public.ghost_profiles
+    UPDATE public.profiles
     SET is_available = FALSE
-    WHERE last_active < (NOW() - INTERVAL '15 minutes');
+    WHERE last_seen < (NOW() - INTERVAL '15 minutes');
 END;
 $$ LANGUAGE plpgsql;
-
--- Enable Supabase Realtime replication on ephemeral_messages
-ALTER PUBLICATION supabase_realtime ADD TABLE public.ephemeral_messages;

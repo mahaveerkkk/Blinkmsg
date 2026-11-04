@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ShieldAlert, RotateCcw, Calculator, Delete } from 'lucide-react';
+import { ShieldAlert, RotateCcw, Calculator } from 'lucide-react';
 import { sound } from '../services/sound';
 import { StorageService } from '../services/storage';
 
@@ -15,11 +15,10 @@ export const PanicModal: React.FC<PanicModalProps> = ({ isOpen, onExitPanic }) =
 
   const handleCalcClick = (val: string) => {
     sound.vibrate(8);
-    if (val === 'C') {
+    if (val === 'AC') {
       setCalcDisplay('0');
     } else if (val === '=') {
       try {
-        // Safe evaluation
         const clean = calcDisplay.replace(/[^0-9+\-*/.]/g, '');
         // eslint-disable-next-line no-eval
         const result = Function(`'use strict'; return (${clean})`)();
@@ -39,20 +38,20 @@ export const PanicModal: React.FC<PanicModalProps> = ({ isOpen, onExitPanic }) =
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#05070d] flex flex-col justify-between p-4 select-none">
-      {/* Top Bar with Discreet Exit */}
+    <div className="fixed inset-0 z-50 bg-black flex flex-col justify-between p-4 select-none">
+      {/* Top Discreet Bar */}
       <div className="flex items-center justify-between pt-2 px-2">
-        <div className="flex items-center space-x-2 text-slate-500">
-          <Calculator className="w-4 h-4 text-slate-600" />
-          <span className="text-xs font-mono text-slate-600">Standard Calc</span>
+        <div className="flex items-center space-x-1.5 text-zinc-600">
+          <Calculator className="w-3.5 h-3.5" />
+          <span className="text-[11px] font-mono text-zinc-600">Calculator</span>
         </div>
 
         <div className="flex items-center space-x-2">
           {/* Purge Reset */}
           <button
             onClick={handleFullPurge}
-            className="px-2.5 py-1 rounded-xl bg-red-950/40 border border-red-500/30 text-red-400 text-[10px] font-mono flex items-center space-x-1"
-            title="Erase all local ghost memory"
+            className="px-2 py-1 rounded-xl bg-red-950/40 border border-red-500/20 text-red-400 text-[10px] font-mono flex items-center space-x-1"
+            title="Erase all local memory"
           >
             <ShieldAlert className="w-3 h-3 text-red-400" />
             <span>Nuke Memory</span>
@@ -64,72 +63,96 @@ export const PanicModal: React.FC<PanicModalProps> = ({ isOpen, onExitPanic }) =
               sound.vibrate(15);
               onExitPanic();
             }}
-            className="p-1.5 rounded-xl bg-[#131824] text-slate-400 hover:text-slate-200"
-            title="Resume BlinkMsg"
+            className="p-1.5 rounded-full bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+            title="Resume App"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Disguised Calculator Display */}
-      <div className="my-auto max-w-xs mx-auto w-full">
-        <div className="bg-[#090d16] border border-[#1f293d] rounded-3xl p-5 shadow-2xl mb-4">
-          <div className="text-right text-4xl font-mono text-slate-100 py-4 px-2 overflow-x-auto truncate">
-            {calcDisplay}
-          </div>
-
-          {/* Calculator Grid */}
-          <div className="grid grid-cols-4 gap-2.5 pt-4 border-t border-[#1f293d]">
-            {['C', '/', '*', '-'].map((op) => (
-              <button
-                key={op}
-                onClick={() => handleCalcClick(op)}
-                className="py-3.5 rounded-2xl bg-[#131824] text-amber-400 font-bold text-lg active:scale-95 transition-transform"
-              >
-                {op}
-              </button>
-            ))}
-            {['7', '8', '9', '+'].map((btn) => (
-              <button
-                key={btn}
-                onClick={() => handleCalcClick(btn)}
-                className={`py-3.5 rounded-2xl ${
-                  btn === '+' ? 'bg-[#131824] text-amber-400' : 'bg-[#0d111a] text-slate-100'
-                } font-bold text-lg active:scale-95 transition-transform`}
-              >
-                {btn}
-              </button>
-            ))}
-            {['4', '5', '6', '='].map((btn) => (
-              <button
-                key={btn}
-                onClick={() => handleCalcClick(btn)}
-                className={`py-3.5 rounded-2xl ${
-                  btn === '=' ? 'bg-emerald-500 text-slate-950' : 'bg-[#0d111a] text-slate-100'
-                } font-bold text-lg active:scale-95 transition-transform`}
-              >
-                {btn}
-              </button>
-            ))}
-            {['1', '2', '3', '0'].map((btn) => (
-              <button
-                key={btn}
-                onClick={() => handleCalcClick(btn)}
-                className="py-3.5 rounded-2xl bg-[#0d111a] text-slate-100 font-bold text-lg active:scale-95 transition-transform"
-              >
-                {btn}
-              </button>
-            ))}
-          </div>
+      {/* Disguised Native-Style Calculator Display */}
+      <div className="my-auto max-w-xs mx-auto w-full px-2">
+        <div className="text-right text-5xl font-light text-white font-sans py-6 px-2 truncate">
+          {calcDisplay}
         </div>
 
-        <p className="text-[11px] text-center text-slate-600 font-mono">
-          Decoy Mode Active • Memory Purged
-        </p>
+        {/* Round Calculator Grid (iOS Style Decoy) */}
+        <div className="grid grid-cols-4 gap-3 pt-2">
+          {['AC', '+/-', '%', '/'].map((op) => (
+            <button
+              key={op}
+              onClick={() => handleCalcClick(op === '+/-' || op === '%' ? '' : op)}
+              className={`w-16 h-16 rounded-full font-medium text-xl flex items-center justify-center active:scale-95 transition-transform ${
+                op === '/'
+                  ? 'bg-[#ff9f0a] text-white'
+                  : 'bg-[#a5a5a5] text-black font-semibold'
+              }`}
+            >
+              {op}
+            </button>
+          ))}
+
+          {['7', '8', '9', '*'].map((btn) => (
+            <button
+              key={btn}
+              onClick={() => handleCalcClick(btn)}
+              className={`w-16 h-16 rounded-full font-medium text-2xl flex items-center justify-center active:scale-95 transition-transform ${
+                btn === '*' ? 'bg-[#ff9f0a] text-white' : 'bg-[#333333] text-white'
+              }`}
+            >
+              {btn === '*' ? '×' : btn}
+            </button>
+          ))}
+
+          {['4', '5', '6', '-'].map((btn) => (
+            <button
+              key={btn}
+              onClick={() => handleCalcClick(btn)}
+              className={`w-16 h-16 rounded-full font-medium text-2xl flex items-center justify-center active:scale-95 transition-transform ${
+                btn === '-' ? 'bg-[#ff9f0a] text-white' : 'bg-[#333333] text-white'
+              }`}
+            >
+              {btn === '-' ? '−' : btn}
+            </button>
+          ))}
+
+          {['1', '2', '3', '+'].map((btn) => (
+            <button
+              key={btn}
+              onClick={() => handleCalcClick(btn)}
+              className={`w-16 h-16 rounded-full font-medium text-2xl flex items-center justify-center active:scale-95 transition-transform ${
+                btn === '+' ? 'bg-[#ff9f0a] text-white' : 'bg-[#333333] text-white'
+              }`}
+            >
+              {btn}
+            </button>
+          ))}
+
+          <button
+            onClick={() => handleCalcClick('0')}
+            className="col-span-2 h-16 rounded-full bg-[#333333] text-white font-medium text-2xl flex items-center justify-start pl-7 active:scale-95 transition-transform"
+          >
+            0
+          </button>
+          <button
+            onClick={() => handleCalcClick('.')}
+            className="w-16 h-16 rounded-full bg-[#333333] text-white font-medium text-2xl flex items-center justify-center active:scale-95 transition-transform"
+          >
+            .
+          </button>
+          <button
+            onClick={() => handleCalcClick('=')}
+            className="w-16 h-16 rounded-full bg-[#ff9f0a] text-white font-medium text-2xl flex items-center justify-center active:scale-95 transition-transform"
+          >
+            =
+          </button>
+        </div>
       </div>
 
-      <div className="pb-4" />
+      <div className="pb-4 text-center">
+        <span className="text-[10px] font-mono text-zinc-800">Standard Calculator</span>
+      </div>
     </div>
   );
 };

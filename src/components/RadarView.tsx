@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MapPin, Globe, MessageCircle } from 'lucide-react';
+import { MapPin, Globe, MessageSquare, Radio } from 'lucide-react';
 import { UserProfile } from '../types';
 import { Avatar } from './Avatar';
 import { MOCK_RADAR_USERS } from '../services/network';
@@ -30,24 +30,36 @@ export const RadarView: React.FC<RadarViewProps> = ({
   });
 
   return (
-    <div className="pb-24 pt-3 px-4 max-w-md mx-auto">
-      {/* Presence Switch Card (Clean Minimal Card) */}
-      <div className="rounded-2xl bg-[#121214] border border-[#1f1f23] p-4 mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-white">
-            Available to Chat
+    <div className="pb-28 pt-4 px-4 max-w-md mx-auto select-none">
+      {/* Header */}
+      <div className="mb-4">
+        <h1 className="font-bold text-2xl tracking-tight text-white">
+          People Nearby
+        </h1>
+        <p className="text-xs text-zinc-400">
+          Discover anonymous users who want to chat right now.
+        </p>
+      </div>
+
+      {/* Visibility Toggle Card */}
+      <div className="rounded-2xl bg-[#121214] border border-white/[0.08] p-4 mb-4 flex items-center justify-between">
+        <div className="pr-3">
+          <h2 className="text-sm font-semibold text-white flex items-center">
+            <span>Make Myself Visible</span>
+            {currentUser.isAvailable && (
+              <span className="ml-2 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            )}
           </h2>
           <p className="text-xs text-zinc-400 mt-0.5">
             {currentUser.isAvailable
-              ? 'Other users can discover you'
-              : 'You are completely invisible'}
+              ? 'Other users can discover and chat with you'
+              : 'You are completely hidden in ghost mode'}
           </p>
         </div>
 
-        {/* Minimal Switch */}
         <button
           onClick={toggleAvailability}
-          className={`w-12 h-7 rounded-full transition-colors duration-200 p-0.5 flex items-center ${
+          className={`w-12 h-7 rounded-full transition-colors duration-200 p-0.5 flex items-center shrink-0 ${
             currentUser.isAvailable ? 'bg-emerald-500' : 'bg-zinc-800'
           }`}
         >
@@ -59,15 +71,15 @@ export const RadarView: React.FC<RadarViewProps> = ({
         </button>
       </div>
 
-      {/* Filter Tabs */}
+      {/* Filter Chips */}
       {currentUser.isAvailable && (
         <div className="flex items-center space-x-2 mb-3">
           <button
             onClick={() => { sound.vibrate(6); setFilter('all'); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
               filter === 'all'
-                ? 'bg-zinc-800 text-white border border-zinc-700'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'bg-white text-black font-semibold'
+                : 'bg-white/[0.06] text-zinc-400 hover:text-white'
             }`}
           >
             <span className="flex items-center">
@@ -78,10 +90,10 @@ export const RadarView: React.FC<RadarViewProps> = ({
 
           <button
             onClick={() => { sound.vibrate(6); setFilter('city'); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
               filter === 'city'
-                ? 'bg-zinc-800 text-white border border-zinc-700'
-                : 'text-zinc-500 hover:text-zinc-300'
+                ? 'bg-white text-black font-semibold'
+                : 'bg-white/[0.06] text-zinc-400 hover:text-white'
             }`}
           >
             <span className="flex items-center">
@@ -98,24 +110,20 @@ export const RadarView: React.FC<RadarViewProps> = ({
           {filteredUsers.map((target) => (
             <div
               key={target.id}
-              className="rounded-2xl bg-[#121214] border border-[#1f1f23] p-3 flex items-center justify-between"
+              className="rounded-2xl bg-[#121214] border border-white/[0.08] p-3 flex items-center justify-between"
             >
               <div className="flex items-center space-x-3 min-w-0 pr-2">
-                <Avatar avatarId={target.avatarId} size="md" />
+                <Avatar avatarId={target.avatarId} size="md" isOnline={true} name={target.handle} />
 
                 <div className="min-w-0">
-                  <div className="flex items-center space-x-1.5">
-                    <h3 className="font-semibold text-white text-sm truncate">
-                      @{target.handle}
-                    </h3>
-                  </div>
-
+                  <h3 className="font-semibold text-white text-sm truncate">
+                    @{target.handle}
+                  </h3>
                   <p className="text-xs text-zinc-400 truncate mt-0.5">
                     {target.vibe}
                   </p>
-
                   <p className="text-[11px] text-zinc-500 mt-0.5">
-                    {target.city} • Online
+                    {target.city} • Active
                   </p>
                 </div>
               </div>
@@ -125,7 +133,7 @@ export const RadarView: React.FC<RadarViewProps> = ({
                   sound.playSend();
                   onStartChatWithUser(target);
                 }}
-                className="px-3.5 py-1.5 rounded-xl bg-white text-black font-semibold text-xs active:scale-95 transition-transform shrink-0"
+                className="px-3.5 py-1.5 rounded-full bg-emerald-500 text-black font-semibold text-xs active:scale-95 transition-transform shrink-0"
               >
                 Chat
               </button>
@@ -133,13 +141,13 @@ export const RadarView: React.FC<RadarViewProps> = ({
           ))}
         </div>
       ) : (
-        <div className="text-center py-16 px-4 rounded-2xl bg-[#121214]/50 border border-zinc-900 mt-6">
-          <MessageCircle className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
-          <h3 className="text-sm font-medium text-zinc-300 mb-1">
+        <div className="text-center py-20 px-4 rounded-3xl bg-[#0c0c0e] border border-white/[0.05] mt-4">
+          <Radio className="w-10 h-10 text-zinc-600 mx-auto mb-2 opacity-40" />
+          <h3 className="text-sm font-semibold text-white mb-1">
             Ghost Mode Active
           </h3>
-          <p className="text-xs text-zinc-500 max-w-xs mx-auto">
-            Turn on "Available to Chat" above to discover people who want to talk right now.
+          <p className="text-xs text-zinc-400 max-w-xs mx-auto">
+            Toggle "Make Myself Visible" above to discover nearby active users.
           </p>
         </div>
       )}

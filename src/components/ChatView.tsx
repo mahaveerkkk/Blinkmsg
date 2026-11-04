@@ -1,19 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft,
-  Phone,
-  Video,
-  Info,
-  Camera,
-  Mic,
-  Image,
-  Heart,
   Timer,
   Flame,
+  Check,
   CheckCheck,
   Eye,
   Trash2,
-  Sparkles,
+  Lock,
+  ArrowUp,
+  ShieldCheck,
 } from 'lucide-react';
 import { ChatMessage, ChatRoom, UserProfile } from '../types';
 import { Avatar } from './Avatar';
@@ -27,8 +23,7 @@ interface ChatViewProps {
 }
 
 const TIMER_OPTIONS = [
-  { label: 'Off (Standard)', value: 0, isBurn: false },
-  { label: '🔥 Vanish on Read', value: 0, isBurn: true },
+  { label: '🔥 Burn on Read', value: 0, isBurn: true },
   { label: '10 seconds', value: 10, isBurn: false },
   { label: '30 seconds', value: 30, isBurn: false },
   { label: '1 minute', value: 60, isBurn: false },
@@ -46,46 +41,44 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [isBurnOnRead, setIsBurnOnRead] = useState(room.isBurnOnRead || false);
   const [showTimerMenu, setShowTimerMenu] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
-  const [vanishMode, setVanishMode] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Initial Vanish notice
-    const welcomeMsg: ChatMessage = {
+    // Initial encrypted handshake notice
+    const initialNotice: ChatMessage = {
       id: 'sys_' + Date.now(),
       roomId: room.id,
       senderId: 'system',
       senderHandle: 'System',
-      text: 'Vanish mode is on. Messages disappear after being read.',
+      text: `Messages are end-to-end encrypted and disappear after ${isBurnOnRead ? 'reading' : `${currentTimer}s`}.`,
       createdAt: Date.now(),
-      timerSeconds: 0,
-      expiresAt: 0,
+      timerSeconds: 15,
+      expiresAt: Date.now() + 15000,
       isBurnOnRead: false,
       status: 'delivered',
     };
-    setMessages([welcomeMsg]);
+    setMessages([initialNotice]);
 
-    const unsubscribe = NetworkService.subscribeToRoom(
-      room.id,
-      (incoming) => {
+    const unsubscribe = NetworkService.subscribeToRoom(room.id, {
+      onMessage: (incoming: any) => {
         sound.playReceive();
         setMessages((prev) => [...prev, incoming]);
       },
-      (typingHandle) => {
+      onTyping: (typingHandle: string) => {
         if (typingHandle !== currentUser.handle) {
           setPeerTyping(true);
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           typingTimeoutRef.current = setTimeout(() => setPeerTyping(false), 2000);
         }
-      }
-    );
+      },
+    });
 
     return () => unsubscribe();
   }, [room.id]);
 
-  // Vanish message destruction timer
+  // Master countdown timer for message self-destruction
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
@@ -114,22 +107,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, peerTyping]);
 
-  const handleSendMessage = (textToSend?: string) => {
-    const text = (textToSend || inputText).trim();
-    if (!text) return;
+  const handleSendMessage = () => {
+    if (!inputText.trim()) return;
 
     sound.playSend();
 
-    const expiresAt = isBurnOnRead ? 0 : Date.now() + (currentTimer || 30) * 1000;
+    const expiresAt = isBurnOnRead ? 0 : Date.now() + currentTimer * 1000;
 
     const newMsg: ChatMessage = {
       id: 'msg_' + Math.random().toString(36).substring(2, 9),
       roomId: room.id,
       senderId: currentUser.id,
       senderHandle: currentUser.handle,
-      text,
+      text: inputText.trim(),
       createdAt: Date.now(),
-      timerSeconds: currentTimer || 30,
+      timerSeconds: currentTimer,
       expiresAt,
       isBurnOnRead,
       status: 'sent',
@@ -140,24 +132,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
     NetworkService.broadcastMessage(room.id, newMsg);
   };
 
-  const handleDoubleTapLike = (msgId: string) => {
-    sound.vibrate([10, 15]);
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === msgId ? { ...m, reaction: m.reaction === '❤️' ? undefined : '❤️' } : m
-      )
-    );
+  const handleTyping = (text: string) => {
+    setInputText(text);
+    NetworkService.broadcastTyping(room.id, currentUser.handle);
   };
 
   const handleRevealBurnOnRead = (msgId: string) => {
-    sound.vibrate(12);
+    sound.vibrate(15);
     setMessages((prev) =>
       prev.map((m) =>
         m.id === msgId
           ? {
               ...m,
               isRevealed: true,
-              expiresAt: Date.now() + 6000,
+              expiresAt: Date.now() + 6000, // 6s countdown once opened
             }
           : m
       )
@@ -166,103 +154,93 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   return (
     <div className="flex flex-col h-[100dvh] bg-black text-white select-none">
-      {/* Instagram DM Header */}
-      <header className="px-3 py-2.5 bg-black border-b border-[#262626] flex items-center justify-between shrink-0 z-30">
+      {/* Top Header (Telegram iOS / Apple Messages Style) */}
+      <header className="px-3 py-2.5 bg-black/90 backdrop-blur-xl border-b border-white/[0.08] flex items-center justify-between shrink-0 z-30">
         <div className="flex items-center space-x-2">
           <button
             onClick={onLeaveRoom}
-            className="p-1 -ml-1 text-white hover:text-zinc-400 active:scale-90 transition-all"
+            className="p-1.5 -ml-1 text-zinc-400 hover:text-white active:scale-90 transition-all rounded-full"
           >
-            <ChevronLeft className="w-7 h-7" />
+            <ChevronLeft className="w-6 h-6" />
           </button>
 
           <Avatar
             avatarId={room.peerAvatarId || 3}
             size="sm"
+            name={room.peerHandle}
             isOnline={true}
           />
 
           <div className="min-w-0 pr-2">
-            <h2 className="font-semibold text-sm text-white truncate leading-tight">
-              {room.peerHandle ? `@${room.peerHandle}` : `Secret Room`}
-            </h2>
-            <p className="text-[11px] text-zinc-400 leading-tight">
-              Active now
+            <div className="flex items-center space-x-1">
+              <h2 className="font-semibold text-[15px] text-white truncate leading-tight">
+                {room.peerHandle ? `@${room.peerHandle}` : `Room #${room.code}`}
+              </h2>
+              <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
+            </div>
+            <p className="text-[11px] text-emerald-400 font-medium leading-tight">
+              End-to-End Encrypted
             </p>
           </div>
         </div>
 
-        {/* Right Icons: Timer, Call, Video, Info */}
-        <div className="flex items-center space-x-3 text-white">
-          <button
-            onClick={() => setShowTimerMenu(!showTimerMenu)}
-            className="p-1 text-zinc-300 hover:text-white relative active:scale-95"
-            title="Vanish Timer"
-          >
-            <Timer className="w-5 h-5 text-amber-400" />
-            <span className="absolute -top-1 -right-1 text-[9px] font-mono text-amber-400 font-bold">
-              {isBurnOnRead ? '🔥' : `${currentTimer}s`}
-            </span>
-          </button>
+        {/* Right Actions: Timer Pill & Delete */}
+        <div className="flex items-center space-x-2">
+          <div className="relative">
+            <button
+              onClick={() => setShowTimerMenu(!showTimerMenu)}
+              className="px-2.5 py-1.5 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] text-xs text-zinc-200 flex items-center space-x-1.5 active:scale-95 transition-all shadow-sm"
+            >
+              {isBurnOnRead ? (
+                <Flame className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              ) : (
+                <Timer className="w-3.5 h-3.5 text-emerald-400" />
+              )}
+              <span className="font-medium text-[11px] font-mono">
+                {isBurnOnRead ? 'Burn' : `${currentTimer}s`}
+              </span>
+            </button>
 
-          <button className="p-1 text-white hover:text-zinc-400 active:scale-95">
-            <Phone className="w-5 h-5" />
-          </button>
-
-          <button className="p-1 text-white hover:text-zinc-400 active:scale-95">
-            <Video className="w-5 h-5" />
-          </button>
+            {/* Timer Sheet Dropdown */}
+            {showTimerMenu && (
+              <div className="absolute right-0 top-11 w-44 rounded-2xl bg-[#18181c] border border-white/10 shadow-2xl p-1 z-50 animate-pop-in">
+                {TIMER_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.label}
+                    onClick={() => {
+                      sound.vibrate(8);
+                      setCurrentTimer(opt.value);
+                      setIsBurnOnRead(opt.isBurn);
+                      setShowTimerMenu(false);
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-xs hover:bg-white/[0.08] flex items-center justify-between text-zinc-200 transition-colors"
+                  >
+                    <span>{opt.label}</span>
+                    {((opt.isBurn && isBurnOnRead) ||
+                      (!opt.isBurn && !isBurnOnRead && currentTimer === opt.value)) && (
+                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => {
               sound.playPanic();
               onLeaveRoom();
             }}
-            className="p-1 text-red-400 hover:text-red-300 active:scale-95"
-            title="End Chat & Nuke"
+            className="p-2 rounded-full text-zinc-400 hover:text-red-400 active:scale-90 transition-all"
+            title="Delete & Purge"
           >
-            <Trash2 className="w-5 h-5" />
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
-
-        {/* Timer Dropdown Menu */}
-        {showTimerMenu && (
-          <div className="absolute right-3 top-14 w-48 rounded-2xl bg-[#262626] border border-white/10 shadow-2xl p-1.5 z-50 animate-fade-in">
-            <p className="text-[10px] uppercase font-bold text-zinc-400 px-3 py-1.5">
-              Disappearing Messages
-            </p>
-            {TIMER_OPTIONS.map((opt) => (
-              <button
-                key={opt.label}
-                onClick={() => {
-                  sound.vibrate(8);
-                  setCurrentTimer(opt.value);
-                  setIsBurnOnRead(opt.isBurn);
-                  setShowTimerMenu(false);
-                }}
-                className="w-full text-left px-3 py-2 rounded-xl text-xs hover:bg-[#333333] flex items-center justify-between text-zinc-200 transition-colors"
-              >
-                <span>{opt.label}</span>
-                {((opt.isBurn && isBurnOnRead) ||
-                  (!opt.isBurn && !isBurnOnRead && currentTimer === opt.value)) && (
-                  <span className="w-2 h-2 rounded-full bg-[#3797f0]" />
-                )}
-              </button>
-            ))}
-          </div>
-        )}
       </header>
 
-      {/* Instagram Vanish Mode Banner */}
-      {vanishMode && (
-        <div className="bg-[#121212] py-2 px-4 text-center border-b border-[#262626] flex items-center justify-center space-x-2 text-xs text-zinc-400">
-          <Sparkles className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
-          <span>Vanish mode is active • Seen messages disappear</span>
-        </div>
-      )}
-
-      {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
+      {/* Messages Canvas */}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {messages.map((msg) => {
           const isMe = msg.senderId === currentUser.id;
           const isSystem = msg.senderId === 'system';
@@ -270,7 +248,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
           if (isSystem) {
             return (
               <div key={msg.id} className="flex justify-center my-4">
-                <span className="px-3.5 py-1.5 rounded-full bg-[#262626]/80 text-[11px] text-zinc-400 text-center max-w-xs">
+                <span className="px-3.5 py-1.5 rounded-full bg-white/[0.05] border border-white/[0.06] text-[11px] text-zinc-400 text-center max-w-xs flex items-center space-x-1">
+                  <ShieldCheck className="w-3 h-3 text-emerald-400 mr-1" />
                   {msg.text}
                 </span>
               </div>
@@ -285,20 +264,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
               key={msg.id}
               className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} transition-opacity duration-300`}
             >
-              {/* Instagram Style Bubble */}
               <div
-                onDoubleClick={() => handleDoubleTapLike(msg.id)}
-                className={`relative max-w-[76%] rounded-[20px] px-4 py-2.5 text-[15px] leading-relaxed shadow-sm cursor-pointer select-none ${
+                className={`max-w-[78%] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed shadow-sm ${
                   isMe
-                    ? 'bg-gradient-to-r from-[#833ab4] via-[#c13584] to-[#e1306c] text-white rounded-br-[4px]'
-                    : 'bg-[#262626] text-white rounded-bl-[4px]'
+                    ? 'bg-[#152e22] text-white border border-emerald-500/20 rounded-br-[4px]'
+                    : 'bg-[#18181b] text-zinc-100 border border-white/[0.06] rounded-bl-[4px]'
                 }`}
               >
                 {/* Burn On Read Shield */}
                 {msg.isBurnOnRead && !msg.isRevealed && !isMe ? (
                   <button
                     onClick={() => handleRevealBurnOnRead(msg.id)}
-                    className="flex items-center space-x-2 py-1 px-2 rounded-xl bg-black/40 text-amber-300 text-xs font-medium active:scale-95 transition-transform"
+                    className="flex items-center space-x-2 py-1 px-2.5 rounded-xl bg-black/40 text-amber-300 text-xs font-medium active:scale-95 transition-transform"
                   >
                     <Eye className="w-4 h-4" />
                     <span>Tap to view (Burns in 6s)</span>
@@ -307,90 +284,61 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   <p className="break-words whitespace-pre-wrap">{msg.text}</p>
                 )}
 
-                {/* Instagram Double-Tap Heart Reaction */}
-                {msg.reaction && (
-                  <div className="absolute -bottom-2 -right-1 px-1.5 py-0.5 rounded-full bg-[#262626] border border-black text-xs shadow-md">
-                    {msg.reaction}
-                  </div>
-                )}
-              </div>
+                {/* Footer Time & Timer Status */}
+                <div
+                  className={`flex items-center justify-end space-x-1.5 mt-1 text-[10px] ${
+                    isMe ? 'text-emerald-300/60' : 'text-zinc-500'
+                  }`}
+                >
+                  {(!msg.isBurnOnRead || msg.isRevealed) && (
+                    <span className="font-mono">
+                      ⏱ {timeLeftSec}s
+                    </span>
+                  )}
 
-              {/* Timestamp & Expiry Subtitle */}
-              <div
-                className={`flex items-center space-x-1 mt-1 text-[10px] text-zinc-500 px-1 ${
-                  isMe ? 'justify-end' : 'justify-start'
-                }`}
-              >
-                {(!msg.isBurnOnRead || msg.isRevealed) && (
-                  <span className="font-mono">⏱ {timeLeftSec}s</span>
-                )}
-                {isMe && <CheckCheck className="w-3 h-3 text-[#3797f0]" />}
+                  {msg.isBurnOnRead && !msg.isRevealed && (
+                    <span className="flex items-center text-amber-400">
+                      <Flame className="w-2.5 h-2.5 fill-current mr-0.5" />
+                      burn
+                    </span>
+                  )}
+
+                  {isMe && <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />}
+                </div>
               </div>
             </div>
           );
         })}
 
-        {/* Typing indicator */}
         {peerTyping && (
-          <div className="flex items-center space-x-2 text-xs text-zinc-500 pl-2">
-            <div className="flex space-x-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-              <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-            </div>
+          <div className="flex items-center space-x-1.5 text-xs text-zinc-400 pl-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>typing...</span>
           </div>
         )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Instagram DM Input Bar */}
-      <div className="p-3 bg-black border-t border-[#262626] pb-[calc(env(safe-area-inset-bottom)+0.5rem)]">
+      {/* Floating Bottom Input Bar */}
+      <div className="p-3 bg-black/95 border-t border-white/[0.08] pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-center space-x-2 max-w-lg mx-auto">
-          {/* Blue Camera Icon Button */}
-          <button className="w-9 h-9 rounded-full bg-[#3797f0] flex items-center justify-center text-white active:scale-95 transition-transform shrink-0">
-            <Camera className="w-5 h-5 fill-current" />
+          <input
+            type="text"
+            value={inputText}
+            onChange={(e) => handleTyping(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+            placeholder="Message"
+            className="flex-1 bg-[#18181b] border border-white/[0.08] focus:border-white/20 rounded-full px-4 py-3 text-[15px] text-white placeholder-zinc-500 outline-none transition-all shadow-inner"
+          />
+
+          <button
+            onClick={handleSendMessage}
+            disabled={!inputText.trim()}
+            className="w-11 h-11 rounded-full bg-emerald-500 text-black flex items-center justify-center font-bold disabled:opacity-20 active:scale-95 transition-all shadow-md shrink-0"
+          >
+            <ArrowUp className="w-5 h-5 stroke-[2.5]" />
           </button>
-
-          {/* Pill Input */}
-          <div className="flex-1 flex items-center bg-[#262626] rounded-full px-4 py-2 border border-transparent focus-within:border-zinc-700">
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => {
-                setInputText(e.target.value);
-                NetworkService.broadcastTyping(room.id, currentUser.handle);
-              }}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Message..."
-              className="flex-1 bg-transparent text-sm text-white placeholder-zinc-500 outline-none"
-            />
-
-            {/* Input Action Icons */}
-            {!inputText.trim() ? (
-              <div className="flex items-center space-x-2.5 text-zinc-400 ml-2">
-                <button className="hover:text-white active:scale-90">
-                  <Mic className="w-5 h-5" />
-                </button>
-                <button className="hover:text-white active:scale-90">
-                  <Image className="w-5 h-5" />
-                </button>
-                <button
-                  onClick={() => handleSendMessage('❤️')}
-                  className="hover:text-red-500 active:scale-90"
-                >
-                  <Heart className="w-5 h-5" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => handleSendMessage()}
-                className="text-sm font-bold text-[#3797f0] hover:text-sky-400 active:scale-95 ml-2"
-              >
-                Send
-              </button>
-            )}
-          </div>
         </div>
       </div>
     </div>
