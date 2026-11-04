@@ -3,7 +3,6 @@ import { UserProfile, ChatRoom, ActiveTab, BlinkRequest } from './types';
 import { StorageService } from './services/storage';
 import { CryptoService } from './services/crypto';
 import { sound } from './services/sound';
-import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { RadarView } from './components/RadarView';
 import { SecretVaultView } from './components/SecretVaultView';
@@ -17,7 +16,6 @@ export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile>(() =>
     StorageService.getOrCreateProfile()
   );
-  // Default tab is 'chats' for real messenger feel
   const [activeTab, setActiveTab] = useState<ActiveTab>('chats');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
   const [activeRoomsList, setActiveRoomsList] = useState<ChatRoom[]>([]);
@@ -104,27 +102,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleTriggerPanic = () => {
-    sound.playPanic();
-    setIsPanicOpen(true);
-    setActiveRoom(null);
-  };
-
-  const getTabTitle = () => {
-    switch (activeTab) {
-      case 'chats':
-        return 'Messages';
-      case 'radar':
-        return 'People Nearby';
-      case 'vault':
-        return 'Secret Room';
-      case 'profile':
-        return 'Settings';
-      default:
-        return 'Blink';
-    }
-  };
-
   if (activeRoom) {
     return (
       <>
@@ -143,17 +120,10 @@ export const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-black text-white flex flex-col font-sans select-none">
-      <Navbar
-        user={currentUser}
-        title={getTabTitle()}
-        onOpenSearch={() => setIsSearchOpen(true)}
-        onNewChat={() => setActiveTab('vault')}
-        onPanic={handleTriggerPanic}
-      />
-
       <main className="flex-1 overflow-y-auto">
         {activeTab === 'chats' && (
           <ChatsListView
+            currentUser={currentUser}
             activeRooms={activeRoomsList}
             blinkRequests={blinkRequests}
             onOpenRoom={(room) => setActiveRoom(room)}
@@ -161,6 +131,9 @@ export const App: React.FC = () => {
             onDeclineRequest={handleDeclineRequest}
             onClearRoom={handleClearRoom}
             onNewChat={() => setActiveTab('vault')}
+            onOpenSearch={() => setIsSearchOpen(true)}
+            onOpenProfile={() => setIsProfileOpen(true)}
+            onStartChatWithUser={handleStartChatWithUser}
           />
         )}
 
@@ -194,6 +167,7 @@ export const App: React.FC = () => {
         )}
       </main>
 
+      {/* Instagram Bottom Nav */}
       <BottomNav
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}

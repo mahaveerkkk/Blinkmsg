@@ -3,36 +3,65 @@ import React from 'react';
 interface AvatarProps {
   avatarId: number;
   size?: 'sm' | 'md' | 'lg' | 'xl';
-  glow?: boolean;
+  hasStory?: boolean;
+  isOnline?: boolean;
 }
 
-const CLEAN_AVATARS = [
-  { bg: 'bg-[#27272a]', text: 'text-zinc-200', symbol: 'BM' },
-  { bg: 'bg-[#1e293b]', text: 'text-sky-300', symbol: 'VK' },
-  { bg: 'bg-[#142e20]', text: 'text-emerald-300', symbol: 'GH' },
-  { bg: 'bg-[#2d1f3d]', text: 'text-purple-300', symbol: 'NX' },
-  { bg: 'bg-[#332014]', text: 'text-amber-300', symbol: 'SP' },
-  { bg: 'bg-[#1f2937]', text: 'text-slate-300', symbol: 'CY' },
-  { bg: 'bg-[#3b1219]', text: 'text-rose-300', symbol: 'RD' },
-  { bg: 'bg-[#18181b]', text: 'text-zinc-400', symbol: 'SH' },
+const IG_AVATARS = [
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
+  'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=150&auto=format&fit=crop&q=80',
 ];
 
-export const Avatar: React.FC<AvatarProps> = ({ avatarId, size = 'md' }) => {
-  const index = Math.abs((avatarId - 1) % CLEAN_AVATARS.length);
-  const item = CLEAN_AVATARS[index];
+export const Avatar: React.FC<AvatarProps> = ({
+  avatarId,
+  size = 'md',
+  hasStory = false,
+  isOnline = false,
+}) => {
+  const index = Math.abs((avatarId - 1) % IG_AVATARS.length);
+  const src = IG_AVATARS[index];
 
   const sizeClasses = {
-    sm: 'w-8 h-8 text-[11px]',
-    md: 'w-10 h-10 text-xs',
-    lg: 'w-14 h-14 text-sm',
-    xl: 'w-20 h-20 text-lg',
+    sm: 'w-8 h-8',
+    md: 'w-13 h-13',
+    lg: 'w-16 h-16',
+    xl: 'w-22 h-22',
+  }[size];
+
+  const innerSize = {
+    sm: 'w-7 h-7',
+    md: 'w-12 h-12',
+    lg: 'w-15 h-15',
+    xl: 'w-20 h-20',
   }[size];
 
   return (
-    <div
-      className={`rounded-full flex items-center justify-center font-semibold tracking-wider ${item.bg} ${item.text} ${sizeClasses} border border-white/5 select-none shrink-0`}
-    >
-      {item.symbol}
+    <div className="relative inline-flex shrink-0 select-none">
+      {/* Instagram Story Gradient Ring */}
+      <div
+        className={`rounded-full flex items-center justify-center ${
+          hasStory
+            ? 'p-[2px] bg-gradient-to-tr from-[#f9ce34] via-[#ee2a7b] to-[#6228d7]'
+            : ''
+        }`}
+      >
+        <img
+          src={src}
+          alt="Avatar"
+          className={`rounded-full object-cover border-2 border-black ${innerSize} bg-[#1a1a1a]`}
+        />
+      </div>
+
+      {/* Instagram Active Now Green Dot */}
+      {isOnline && (
+        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#10b981] border-[2.5px] border-black" />
+      )}
     </div>
   );
 };

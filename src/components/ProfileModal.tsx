@@ -72,7 +72,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         {/* Current Avatar & Picker */}
         <div className="flex flex-col items-center mb-5">
           <div className="mb-3">
-            <Avatar avatarId={avatarId} size="xl" glow={true} />
+            <Avatar avatarId={avatarId} size="xl" hasStory={true} />
           </div>
 
           <div className="flex items-center space-x-2 overflow-x-auto py-1 px-2 max-w-full">
