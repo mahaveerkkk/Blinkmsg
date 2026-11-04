@@ -159,7 +159,6 @@ export const App: React.FC = () => {
             onClearRoom={handleClearRoom}
             onOpenSearch={() => setIsSearchOpen(true)}
             onOpenVault={() => setActiveTab('vault')}
-            onOpenRadar={() => setActiveTab('radar')}
             onTriggerPanic={handleTriggerPanic}
           />
         )}

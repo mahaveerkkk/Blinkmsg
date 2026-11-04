@@ -4,7 +4,7 @@ import { UserProfile } from '../types';
 import { supabase } from '../services/network';
 import { StorageService } from '../services/storage';
 import { sound } from '../services/sound';
-import { ArrowRight, KeyRound, Sparkles, AlertCircle } from 'lucide-react';
+import { ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
 import { Avatar } from './Avatar';
 
 interface SplashScreenProps {
@@ -12,25 +12,13 @@ interface SplashScreenProps {
 }
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
-  const [mode, setMode] = useState<'welcome' | 'create' | 'restore'>('welcome');
+  const [mode, setMode] = useState<'create' | 'restore'>('create');
   const [handle, setHandle] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [avatarId, setAvatarId] = useState(1);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-
-  // Check if existing profile in storage
-  const existing = StorageService.getProfile();
-
-  const handleQuickEnter = () => {
-    if (existing) {
-      sound.playSend();
-      onComplete(existing);
-    } else {
-      setMode('create');
-    }
-  };
 
   const handleCreateAccount = async () => {
     setError('');
@@ -132,7 +120,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         setLoading(false);
         onComplete(restored);
         return;
-      } catch (err) {
+      } catch {
         setError('Error connecting to Supabase.');
       }
     }
@@ -144,50 +132,21 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
     <div className="fixed inset-0 z-50 bg-[#05070d] text-white flex flex-col justify-between p-6 select-none overflow-y-auto">
       <div />
 
-      {/* Center Hero */}
+      {/* Center Setup Box */}
       <div className="flex flex-col items-center text-center my-auto max-w-sm mx-auto w-full">
         {/* Animated VanishLogo */}
-        <div className="mb-5 animate-pop-in">
-          <VanishLogo size={92} animated={true} />
+        <div className="mb-4 animate-pop-in">
+          <VanishLogo size={84} animated={true} />
         </div>
 
-        <h1 className="text-3xl font-black tracking-tight text-white mb-1.5">
+        <h1 className="text-2xl font-black tracking-tight text-white mb-1">
           BlinkMsg
         </h1>
-        <p className="text-xs text-[#D4FF00] font-mono tracking-wider uppercase mb-6 font-semibold">
+        <p className="text-xs text-[#D4FF00] font-mono tracking-wider uppercase mb-6 font-bold">
           No Number • No Account • No History
         </p>
 
-        {/* Mode: Welcome Screen */}
-        {mode === 'welcome' && (
-          <div className="w-full space-y-3 animate-fade-in">
-            {existing ? (
-              <div className="p-4 rounded-2xl bg-[#12151B] border border-white/10 mb-4">
-                <p className="text-xs text-zinc-400 mb-1">Logged in as</p>
-                <p className="font-bold text-lg text-white font-mono">@{existing.handle}</p>
-              </div>
-            ) : null}
-
-            <button
-              onClick={handleQuickEnter}
-              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black font-extrabold text-sm flex items-center justify-center space-x-2 active:scale-95 transition-transform shadow-[0_0_20px_rgba(212,255,0,0.3)]"
-            >
-              <span>{existing ? 'Enter App' : 'Create Ghost Handle'}</span>
-              <ArrowRight className="w-4 h-4 stroke-[2.5]" />
-            </button>
-
-            {!existing && (
-              <button
-                onClick={() => setMode('restore')}
-                className="w-full py-3 rounded-2xl bg-white/[0.06] hover:bg-white/[0.1] text-zinc-300 text-xs font-semibold active:scale-95 transition-all border border-white/5"
-              >
-                Already have a handle? Restore
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Mode: Create Handle */}
+        {/* Mode: Create Account Form */}
         {mode === 'create' && (
           <div className="w-full space-y-3.5 text-left animate-fade-in">
             {/* Avatar Picker */}
@@ -195,9 +154,12 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
               {[1, 2, 3, 4, 5, 6].map((id) => (
                 <button
                   key={id}
-                  onClick={() => setAvatarId(id)}
+                  onClick={() => {
+                    sound.vibrate(6);
+                    setAvatarId(id);
+                  }}
                   className={`p-0.5 rounded-full transition-transform ${
-                    avatarId === id ? 'ring-2 ring-[#D4FF00] scale-110' : 'opacity-50'
+                    avatarId === id ? 'ring-2 ring-[#D4FF00] scale-110' : 'opacity-40'
                   }`}
                 >
                   <Avatar avatarId={id} size="sm" />
@@ -206,37 +168,37 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase">
-                Choose Unique @Handle *
+              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase font-semibold">
+                Pick Your Unique @Handle *
               </label>
               <div className="relative">
-                <span className="absolute left-3.5 top-3 text-[#D4FF00] font-mono text-sm">@</span>
+                <span className="absolute left-3.5 top-3 text-[#D4FF00] font-mono text-sm font-bold">@</span>
                 <input
                   type="text"
                   value={handle}
                   onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                  placeholder="your_handle"
+                  placeholder="e.g. veer"
                   autoFocus
-                  className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/50 rounded-2xl pl-8 pr-4 py-2.5 text-sm font-mono text-white placeholder-zinc-600 outline-none"
+                  className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/60 rounded-2xl pl-8 pr-4 py-2.5 text-sm font-mono text-white placeholder-zinc-600 outline-none shadow-inner"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase">
+              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase font-semibold">
                 Display Name (Optional)
               </label>
               <input
                 type="text"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="e.g. Alex"
-                className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/50 rounded-2xl px-4 py-2.5 text-sm text-white placeholder-zinc-600 outline-none"
+                placeholder="e.g. Veer"
+                className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/60 rounded-2xl px-4 py-2.5 text-sm text-white placeholder-zinc-600 outline-none shadow-inner"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase">
+              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase font-semibold">
                 Optional 4-Digit Recovery PIN
               </label>
               <input
@@ -245,7 +207,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                 placeholder="••••"
-                className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/50 rounded-2xl px-4 py-2 text-center text-sm font-mono tracking-widest text-white outline-none"
+                className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/60 rounded-2xl px-4 py-2 text-center text-sm font-mono tracking-widest text-white outline-none shadow-inner"
               />
             </div>
 
@@ -259,43 +221,45 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             <button
               onClick={handleCreateAccount}
               disabled={loading || !handle.trim()}
-              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black font-extrabold text-sm flex items-center justify-center space-x-2 active:scale-95 transition-transform disabled:opacity-40 shadow-[0_0_20px_rgba(212,255,0,0.3)]"
+              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black font-extrabold text-sm flex items-center justify-center space-x-2 active:scale-95 transition-transform disabled:opacity-40 shadow-[0_0_20px_rgba(212,255,0,0.3)] mt-2"
             >
-              <span>{loading ? 'Creating...' : 'Start Vanishing'}</span>
+              <span>{loading ? 'Creating...' : 'Create Handle & Enter'}</span>
               <ArrowRight className="w-4 h-4 stroke-[2.5]" />
             </button>
 
-            <button
-              onClick={() => setMode('welcome')}
-              className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 py-1"
-            >
-              Back
-            </button>
+            <div className="text-center pt-2">
+              <button
+                onClick={() => setMode('restore')}
+                className="text-xs text-zinc-400 hover:text-white"
+              >
+                Already have an account? <span className="text-[#D4FF00] font-semibold">Login</span>
+              </button>
+            </div>
           </div>
         )}
 
-        {/* Mode: Restore Account */}
+        {/* Mode: Restore Account Form */}
         {mode === 'restore' && (
           <div className="w-full space-y-3.5 text-left animate-fade-in">
             <div>
-              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase">
-                Enter your @Handle
+              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase font-semibold">
+                Your Existing @Handle
               </label>
               <div className="relative">
-                <span className="absolute left-3.5 top-3 text-[#D4FF00] font-mono text-sm">@</span>
+                <span className="absolute left-3.5 top-3 text-[#D4FF00] font-mono text-sm font-bold">@</span>
                 <input
                   type="text"
                   value={handle}
                   onChange={(e) => setHandle(e.target.value.toLowerCase().replace('@', ''))}
-                  placeholder="your_handle"
+                  placeholder="e.g. veer"
                   autoFocus
-                  className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/50 rounded-2xl pl-8 pr-4 py-2.5 text-sm font-mono text-white placeholder-zinc-600 outline-none"
+                  className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/60 rounded-2xl pl-8 pr-4 py-2.5 text-sm font-mono text-white placeholder-zinc-600 outline-none shadow-inner"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase">
+              <label className="block text-[11px] font-mono text-zinc-400 mb-1 uppercase font-semibold">
                 4-Digit PIN (If you set one)
               </label>
               <input
@@ -304,7 +268,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
                 placeholder="••••"
-                className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/50 rounded-2xl px-4 py-2 text-center text-sm font-mono tracking-widest text-white outline-none"
+                className="w-full bg-[#12151B] border border-white/10 focus:border-[#D4FF00]/60 rounded-2xl px-4 py-2 text-center text-sm font-mono tracking-widest text-white outline-none shadow-inner"
               />
             </div>
 
@@ -318,25 +282,27 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             <button
               onClick={handleRestoreAccount}
               disabled={loading || !handle.trim()}
-              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black font-extrabold text-sm flex items-center justify-center space-x-2 active:scale-95 transition-transform disabled:opacity-40 shadow-[0_0_20px_rgba(212,255,0,0.3)]"
+              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] text-black font-extrabold text-sm flex items-center justify-center space-x-2 active:scale-95 transition-transform disabled:opacity-40 shadow-[0_0_20px_rgba(212,255,0,0.3)] mt-2"
             >
               <span>{loading ? 'Searching...' : 'Restore Identity'}</span>
               <ArrowRight className="w-4 h-4 stroke-[2.5]" />
             </button>
 
-            <button
-              onClick={() => setMode('welcome')}
-              className="w-full text-center text-xs text-zinc-500 hover:text-zinc-300 py-1"
-            >
-              Back
-            </button>
+            <div className="text-center pt-2">
+              <button
+                onClick={() => setMode('create')}
+                className="text-xs text-zinc-400 hover:text-white"
+              >
+                Want a new identity? <span className="text-[#D4FF00] font-semibold">Sign Up</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
 
       {/* Footer */}
       <div className="text-center text-[11px] text-zinc-600 font-mono">
-        BlinkMsg v1.0 • Client-side AES-256-GCM
+        BlinkMsg • E2E Encrypted Ephemeral Chat
       </div>
     </div>
   );

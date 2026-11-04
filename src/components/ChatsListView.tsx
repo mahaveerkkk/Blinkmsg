@@ -20,7 +20,6 @@ interface ChatsListViewProps {
   onClearRoom: (roomId: string) => void;
   onOpenSearch: () => void;
   onOpenVault: () => void;
-  onOpenRadar: () => void;
   onTriggerPanic: () => void;
 }
 
@@ -38,26 +37,18 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
 }) => {
   return (
     <div className="pb-28 max-w-md mx-auto select-none bg-black min-h-screen text-white">
-      {/* Clean Minimal Header */}
+      {/* Clean Header */}
       <header className="sticky top-0 z-40 bg-black/95 backdrop-blur-xl px-4 py-3.5 flex items-center justify-between border-b border-white/[0.08]">
         <div>
           <h1 className="font-bold text-2xl tracking-tight text-white">
             Messages
           </h1>
-          <p className="text-xs text-zinc-400 font-mono">
+          <p className="text-xs text-[#D4FF00] font-mono font-semibold">
             @{currentUser.handle}
           </p>
         </div>
 
         <div className="flex items-center space-x-2">
-          <button
-            onClick={onOpenSearch}
-            className="w-9 h-9 rounded-full bg-white/[0.06] hover:bg-white/[0.1] flex items-center justify-center text-zinc-300 active:scale-90 transition-all border border-white/[0.06]"
-            title="Search username"
-          >
-            <Search className="w-4 h-4" />
-          </button>
-
           <button
             onClick={onTriggerPanic}
             className="px-2.5 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold active:scale-90 transition-all flex items-center space-x-1"
@@ -68,6 +59,19 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
           </button>
         </div>
       </header>
+
+      {/* Prominent Search Bar (Telegram / WhatsApp Style) */}
+      <div className="px-4 py-3">
+        <div
+          onClick={onOpenSearch}
+          className="w-full bg-[#12151B] border border-white/[0.08] hover:border-white/20 rounded-2xl px-4 py-2.5 flex items-center space-x-2.5 cursor-pointer text-zinc-400 transition-all shadow-inner"
+        >
+          <Search className="w-4 h-4 text-zinc-400" />
+          <span className="text-xs font-medium text-zinc-400">
+            Search users by @handle...
+          </span>
+        </div>
+      </div>
 
       {/* Incoming Requests */}
       {blinkRequests.length > 0 && (
@@ -82,7 +86,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                 className="p-3 rounded-2xl bg-[#141416] border border-white/[0.08] flex items-center justify-between"
               >
                 <div className="flex items-center space-x-3">
-                  <Avatar avatarId={req.fromUser.avatarId} size="sm" isOnline={true} />
+                  <Avatar avatarId={req.fromUser.avatarId} size="sm" isOnline={true} name={req.fromUser.handle} />
                   <div>
                     <h4 className="font-semibold text-sm text-white">
                       @{req.fromUser.handle}
@@ -96,7 +100,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={() => onAcceptRequest(req)}
-                    className="px-3 py-1 rounded-full bg-emerald-500 text-black font-semibold text-xs active:scale-95"
+                    className="px-3 py-1 rounded-full bg-[#D4FF00] text-black font-bold text-xs active:scale-95"
                   >
                     Accept
                   </button>
@@ -114,7 +118,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
       )}
 
       {/* Active Chats Section */}
-      <div className="px-4 pt-3">
+      <div className="px-4 pt-1">
         {activeRooms.length > 0 ? (
           <div className="space-y-1">
             {activeRooms.map((room) => (
@@ -136,7 +140,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
                       <h4 className="font-semibold text-sm text-white truncate">
                         {room.peerHandle ? `@${room.peerHandle}` : `Room #${room.code}`}
                       </h4>
-                      <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <Lock className="w-3 h-3 text-[#D4FF00] shrink-0" />
                     </div>
 
                     <p className="text-xs text-zinc-400 truncate mt-0.5">
@@ -166,7 +170,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
             ))}
           </div>
         ) : (
-          <div className="text-center py-28 px-4 rounded-3xl bg-[#0c0c0e] border border-white/[0.05] mt-4">
+          <div className="text-center py-24 px-4 rounded-3xl bg-[#0c0c0e] border border-white/[0.05] mt-2">
             <div className="w-14 h-14 rounded-full bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-zinc-400 mx-auto mb-3 shadow-inner">
               <MessageSquare className="w-6 h-6 text-zinc-400" />
             </div>
@@ -174,7 +178,7 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
               No Conversations Yet
             </h3>
             <p className="text-xs text-zinc-400 max-w-xs mx-auto mb-6 leading-relaxed">
-              Open the Secret Room tab to create a 6-digit code or QR code, or search a user's @handle to connect.
+              Use the Search bar above to find a @handle, or open the Secret Room tab to connect with a 6-digit PIN.
             </p>
 
             <button

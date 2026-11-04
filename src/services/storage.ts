@@ -1,19 +1,17 @@
 import { UserProfile, ChatRoom } from '../types';
 import { CryptoService } from './crypto';
 
-const STORAGE_KEY = 'blinkmsg_ghost_identity';
+const STORAGE_KEY = 'blinkmsg_user_v2';
 const ROOMS_KEY = 'blinkmsg_active_rooms';
 
 const GHOST_NAMES = [
   'ShadowFalcon', 'CyberPhantom', 'SilentPulse', 'NeonSpecter', 
-  'VanishKnight', 'EchoRaven', 'ZeroCipher', 'ObsidianRider',
-  'NightVoyager', 'QuantumDrifter', 'NovaStalker', 'CosmicGhost'
+  'VanishKnight', 'EchoRaven', 'ZeroCipher', 'ObsidianRider'
 ];
 
 const VIBE_TAGS = [
   '⚡ Burning secrets', '🕶️ Ghost mode ON', '🌙 Late night talks',
-  '☕ Coffee & deep thoughts', '🚀 Tech & future', '🔥 Burn after reading',
-  '🎧 Listening to Synthwave', '🤫 Leave no trace'
+  '☕ Coffee & deep thoughts', '🔥 Burn after reading', '🤫 Leave no trace'
 ];
 
 export class StorageService {
@@ -22,6 +20,8 @@ export class StorageService {
    */
   static getProfile(): UserProfile | null {
     try {
+      // Remove any legacy auto-generated profiles
+      localStorage.removeItem('blinkmsg_ghost_identity');
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         return JSON.parse(saved);
