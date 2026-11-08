@@ -33,9 +33,6 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install NPM Dependencies
         run: npm install
 
@@ -58,10 +55,12 @@ jobs:
           cd android
           ./gradlew assembleRelease --no-daemon
 
-      - name: Rename APKs for Easy Identification
+      - name: Prepare Output APKs
         run: |
           mkdir -p output_apks
-          cp android/app/build/outputs/apk/debug/app-debug.apk output_apks/BlinkMsg-debug.apk
+          if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk output_apks/BlinkMsg-debug.apk
+          fi
           if [ -f android/app/build/outputs/apk/release/app-release-unsigned.apk ]; then
             cp android/app/build/outputs/apk/release/app-release-unsigned.apk output_apks/BlinkMsg-release-unsigned.apk
           fi
