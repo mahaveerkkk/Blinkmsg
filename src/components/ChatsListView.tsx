@@ -231,10 +231,18 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
               Scan a QR code or search a @handle to start an end-to-end encrypted chat.
             </p>
 
-            <div className="flex items-center justify-center space-x-3">
+            <div className="flex flex-wrap items-center justify-center gap-2 max-w-xs mx-auto">
+              <button
+                onClick={onOpenVault}
+                className="px-3.5 py-2 rounded-xl bg-[#D4FF00] text-black font-extrabold text-xs active:scale-95 transition-all shadow-md flex items-center space-x-1.5"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Enter PIN</span>
+              </button>
+
               <button
                 onClick={onOpenScanner}
-                className="px-4 py-2 rounded-xl bg-[#D4FF00] text-black font-extrabold text-xs active:scale-95 transition-all shadow-md flex items-center space-x-1.5"
+                className="px-3.5 py-2 rounded-xl bg-white/[0.08] hover:bg-white/[0.12] text-white font-bold text-xs active:scale-95 transition-all flex items-center space-x-1.5"
               >
                 <QrCode className="w-3.5 h-3.5" />
                 <span>Scan QR</span>
@@ -242,10 +250,10 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
 
               <button
                 onClick={onOpenSearch}
-                className="px-4 py-2 rounded-xl bg-white/[0.08] hover:bg-white/[0.12] text-white font-bold text-xs active:scale-95 transition-all flex items-center space-x-1.5"
+                className="px-3.5 py-2 rounded-xl bg-white/[0.08] hover:bg-white/[0.12] text-white font-bold text-xs active:scale-95 transition-all flex items-center space-x-1.5"
               >
                 <Search className="w-3.5 h-3.5" />
-                <span>Find @handle</span>
+                <span>Search</span>
               </button>
             </div>
           </div>

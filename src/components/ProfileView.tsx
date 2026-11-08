@@ -9,14 +9,18 @@ import {
   X,
   User,
   Shield,
-  Volume2,
-  VolumeX,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Sparkles,
+  HelpCircle,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { UserProfile } from '../types';
 import { Avatar } from './Avatar';
 import { sound } from '../services/sound';
 import { StorageService } from '../services/storage';
+import { handleToPin } from '../services/network';
 
 interface ProfileViewProps {
   currentUser: UserProfile;
@@ -25,8 +29,8 @@ interface ProfileViewProps {
 }
 
 const INDIAN_CITIES = [
-  'New Delhi', 'Mumbai', 'Bengaluru', 'Jaipur', 'Hyderabad', 
-  'Pune', 'Ahmedabad', 'Kolkata', 'Chandigarh', 'Lucknow'
+  'New Delhi', 'Mumbai', 'Bengaluru', 'Jaipur', 'Hyderabad',
+  'Pune', 'Ahmedabad', 'Kolkata', 'Chandigarh', 'Lucknow',
 ];
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -41,8 +45,13 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [isAvailable, setIsAvailable] = useState(currentUser.isAvailable);
   const [defaultTimer, setDefaultTimer] = useState<number>(30);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [showRecoveryPin, setShowRecoveryPin] = useState(false);
   const [copiedHandle, setCopiedHandle] = useState(false);
+  const [copiedPin, setCopiedPin] = useState(false);
   const [savedToast, setSavedToast] = useState(false);
+
+  const myPin = handleToPin(currentUser.handle);
+  const formattedPin = myPin.length === 6 ? `${myPin.slice(0, 3)} - ${myPin.slice(3)}` : myPin;
 
   const handleToggleOnline = () => {
     sound.vibrate(10);
@@ -72,9 +81,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setTimeout(() => setCopiedHandle(false), 2000);
   };
 
+  const handleCopyPin = () => {
+    navigator.clipboard?.writeText(myPin);
+    sound.vibrate(10);
+    setCopiedPin(true);
+    setTimeout(() => setCopiedPin(false), 2000);
+  };
+
   return (
-    <div className="pb-36 pt-4 px-4 max-w-md mx-auto select-none text-white animate-fade-in font-sans min-h-screen bg-[#07080B]">
-      {/* 1. Header Card (Telegram / iOS Style) */}
+    <div className="pb-36 pt-3 px-4 max-w-md mx-auto select-none text-white animate-fade-in font-sans min-h-screen bg-[#07080B]">
+      {/* 1. Header Card (Telegram / iOS Glass Aesthetic) */}
       <div className="rounded-3xl bg-[#0F121C] border border-white/[0.08] p-5 shadow-xl mb-4 text-center relative overflow-hidden">
         <div className="relative inline-block mb-2">
           <Avatar avatarId={avatarId} size="xl" name={currentUser.handle} />
@@ -114,7 +130,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
 
         {/* Persona Selector Strip */}
-        <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-center space-x-2">
+        <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-center space-x-2.5">
           {[1, 2, 3, 4, 5, 6].map((id) => (
             <button
               key={id}
@@ -134,7 +150,92 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </div>
 
-      {/* 2. Privacy & Presence (Clean Grouped Settings Card) */}
+      {/* 2. Personal Connection PIN (Permanent Code) */}
+      <div className="rounded-2xl bg-[#0F121C] border border-white/[0.08] p-4 mb-4 shadow-sm">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-mono font-bold text-zinc-400 uppercase tracking-wider flex items-center space-x-1.5">
+            <KeyRound className="w-3.5 h-3.5 text-[#D4FF00]" />
+            <span>Personal Connection PIN</span>
+          </span>
+          <span className="px-2 py-0.5 rounded-full bg-[#D4FF00]/10 text-[#D4FF00] text-[9px] font-mono font-bold">
+            PERMANENT
+          </span>
+        </div>
+
+        <div className="bg-[#07080B] rounded-xl p-3 border border-white/[0.06] flex items-center justify-between">
+          <div>
+            <span className="font-mono text-2xl font-black text-[#D4FF00] tracking-wider block">
+              {formattedPin}
+            </span>
+            <span className="text-[11px] text-zinc-400 block mt-0.5">
+              Share this PIN or QR with friends to connect
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-1.5">
+            <button
+              onClick={handleCopyPin}
+              className="p-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-zinc-200 active:scale-90 transition-all border border-white/[0.06]"
+              title="Copy PIN"
+            >
+              {copiedPin ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
+            </button>
+            <button
+              onClick={() => {
+                sound.vibrate(8);
+                setShowQRModal(true);
+              }}
+              className="p-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-zinc-200 active:scale-90 transition-all border border-white/[0.06]"
+              title="Show QR Code"
+            >
+              <QrCode className="w-4 h-4 text-[#D4FF00]" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Account Persistence & Recovery Info (Clear Answers to User Questions) */}
+      <div className="rounded-2xl bg-[#0F121C] border border-white/[0.08] p-4 mb-4 shadow-sm space-y-3">
+        <h3 className="text-xs font-mono font-bold text-zinc-400 uppercase tracking-wider flex items-center space-x-1.5">
+          <Shield className="w-3.5 h-3.5 text-[#00F5A0]" />
+          <span>Account Recovery & Database Safety</span>
+        </h3>
+
+        <div className="p-3 rounded-xl bg-[#07080B] border border-white/[0.06] space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-zinc-400 font-mono">Account Handle:</span>
+            <span className="font-mono font-bold text-white">@{currentUser.handle}</span>
+          </div>
+
+          <div className="flex items-center justify-between text-xs pt-1 border-t border-white/[0.04]">
+            <span className="text-zinc-400 font-mono">Recovery PIN:</span>
+            <div className="flex items-center space-x-2">
+              <span className="font-mono font-bold text-[#D4FF00]">
+                {showRecoveryPin ? (currentUser.pin || myPin) : '••••'}
+              </span>
+              <button
+                onClick={() => setShowRecoveryPin(!showRecoveryPin)}
+                className="text-zinc-400 hover:text-white"
+              >
+                {showRecoveryPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-emerald-500/[0.08] border border-emerald-500/20 text-[11px] text-zinc-300 space-y-1.5 leading-relaxed">
+          <div className="flex items-center space-x-1.5 text-emerald-400 font-bold">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Never Lose Your Account</span>
+          </div>
+          <p>
+            Your identity profile is permanently registered in the secure cloud database.
+            If you reinstall the app or change phones, choose <strong className="text-white">"Restore Existing Account"</strong> on the startup screen and enter your <span className="text-[#D4FF00] font-mono">@{currentUser.handle}</span>.
+          </p>
+        </div>
+      </div>
+
+      {/* 4. Privacy & Presence (Clean Grouped Settings Card) */}
       <div className="rounded-2xl bg-[#0F121C] border border-white/[0.08] p-4 mb-4 shadow-sm space-y-4">
         <h3 className="text-xs font-mono font-bold text-zinc-400 uppercase tracking-wider flex items-center space-x-1.5">
           <Shield className="w-3.5 h-3.5 text-[#00F5A0]" />
@@ -198,7 +299,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       </div>
 
-      {/* 3. Identity Details (Clean Form) */}
+      {/* 5. Identity Details (Clean Form) */}
       <div className="rounded-2xl bg-[#0F121C] border border-white/[0.08] p-4 mb-4 shadow-sm space-y-3.5">
         <h3 className="text-xs font-mono font-bold text-zinc-400 uppercase tracking-wider flex items-center space-x-1.5">
           <User className="w-3.5 h-3.5 text-[#D4FF00]" />
@@ -256,7 +357,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </button>
       </div>
 
-      {/* 4. Danger Zone */}
+      {/* 6. Danger Zone */}
       <div className="pt-2 text-center border-t border-white/[0.06] mb-6">
         <button
           onClick={() => {
@@ -285,15 +386,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
 
             <h3 className="font-extrabold text-base text-white mb-0.5">
-              My QR Passport
+              My Personal QR
             </h3>
-            <p className="text-xs text-zinc-400 mb-3 font-mono">
+            <p className="text-xs text-zinc-400 mb-1 font-mono">
               @{currentUser.handle}
+            </p>
+            <p className="text-xs text-[#D4FF00] font-mono font-bold mb-3">
+              PIN: {formattedPin}
             </p>
 
             <div className="p-3 bg-white rounded-2xl mb-3 inline-block shadow-lg">
               <QRCodeSVG
-                value={`https://blinkmsg.app/join/@${currentUser.handle}`}
+                value={`https://blinkmsg.app/join/${myPin}`}
                 size={160}
                 bgColor="#ffffff"
                 fgColor="#000000"

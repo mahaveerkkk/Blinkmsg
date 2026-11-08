@@ -325,7 +325,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
     setMessages((prev) => [...prev, newMsg]);
     setInputText('');
-    NetworkService.broadcastMessage(room.id, newMsg, room.code);
+    NetworkService.broadcastMessage(room.id, newMsg, room.code, peerHandle || room.peerHandle);
   };
 
   const handleTyping = (text: string) => {

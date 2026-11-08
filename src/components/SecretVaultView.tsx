@@ -1,39 +1,47 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Copy, Check, RefreshCw, KeyRound, Radio, ShieldCheck, Sparkles, ArrowRight } from 'lucide-react';
+import { Copy, Check, KeyRound, QrCode, ArrowRight, ShieldCheck, Sparkles, Camera } from 'lucide-react';
 import { ChatRoom, UserProfile } from '../types';
 import { sound } from '../services/sound';
-import { StorageService } from '../services/storage';
-import { supabase, NetworkService } from '../services/network';
+import { supabase, NetworkService, handleToPin } from '../services/network';
 
 interface SecretVaultViewProps {
   currentUser: UserProfile;
   onEnterRoom: (room: ChatRoom) => void;
+  onStartChatWithUser?: (user: UserProfile) => void;
+  onOpenScanner?: () => void;
 }
 
 export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
   currentUser,
   onEnterRoom,
+  onStartChatWithUser,
+  onOpenScanner,
 }) => {
   const [mode, setMode] = useState<'create' | 'join'>('create');
-  const [myCode, setMyCode] = useState<string>(() => StorageService.getMyRoomCode());
+  const myPin = handleToPin(currentUser.handle);
   const [joinCode, setJoinCode] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const inviteUrl = `https://blinkmsg.app/join/${myCode}`;
+  const inviteUrl = `https://blinkmsg.app/join/${myPin}`;
 
+  const formattedPin = myPin.length === 6 ? `${myPin.slice(0, 3)} - ${myPin.slice(3)}` : myPin;
+
+  // Listen live to user's personal room or inbox
   useEffect(() => {
-    if (mode !== 'create' || !myCode) return;
+    if (mode !== 'create') return;
 
-    const roomId = `room_${myCode}`;
+    const roomId = `room_${myPin}`;
 
     if (supabase) {
       supabase
         .from('chat_rooms')
         .upsert({
           id: roomId,
-          code: myCode,
+          code: myPin,
           timer_seconds: 30,
           is_burn_on_read: false,
         })
@@ -43,11 +51,11 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     const unsubscribe = NetworkService.subscribeToRoom(roomId, {
       onPeerJoin: (peer) => {
         sound.playReceive();
-        sound.vibrate([20, 50, 30]);
+        sound.vibrate([25, 50, 25]);
 
         const room: ChatRoom = {
           id: roomId,
-          code: myCode,
+          code: myPin,
           participantCount: 2,
           timerSeconds: 30,
           isBurnOnRead: false,
@@ -62,7 +70,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
         const room: ChatRoom = {
           id: roomId,
-          code: myCode,
+          code: myPin,
           participantCount: 2,
           timerSeconds: 30,
           isBurnOnRead: false,
@@ -75,16 +83,10 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
     });
 
     return () => unsubscribe();
-  }, [mode, myCode]);
-
-  const handleGenerateNewCode = () => {
-    sound.vibrate(10);
-    const newCode = StorageService.refreshMyRoomCode();
-    setMyCode(newCode);
-  };
+  }, [mode, myPin]);
 
   const handleCopyCode = () => {
-    navigator.clipboard?.writeText(myCode);
+    navigator.clipboard?.writeText(myPin);
     sound.vibrate(15);
     setCopiedCode(true);
     setTimeout(() => setCopiedCode(false), 2000);
@@ -99,13 +101,13 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
   const handleEnterMyRoom = async () => {
     sound.playSend();
-    const roomId = `room_${myCode}`;
+    const roomId = `room_${myPin}`;
 
     if (supabase) {
       try {
         await supabase.from('chat_rooms').upsert({
           id: roomId,
-          code: myCode,
+          code: myPin,
           timer_seconds: 30,
           is_burn_on_read: false,
         });
@@ -116,7 +118,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
     const room: ChatRoom = {
       id: roomId,
-      code: myCode,
+      code: myPin,
       participantCount: 1,
       timerSeconds: 30,
       isBurnOnRead: false,
@@ -127,58 +129,80 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
   };
 
   const handleJoinByCode = async () => {
-    const clean = joinCode.trim().replace(/\D/g, '');
-    if (clean.length < 6) return;
+    setErrorMsg('');
+    const clean = joinCode.trim().toLowerCase().replace(/^@/, '');
+    if (!clean || clean.length < 3) {
+      setErrorMsg('Please enter a 6-digit PIN or @handle.');
+      sound.playPanic();
+      return;
+    }
 
-    sound.playSend();
-    const roomId = `room_${clean}`;
+    setIsSearching(true);
+    sound.vibrate(12);
 
-    if (supabase) {
-      try {
+    try {
+      // 1. Try finding friend by 6-digit PIN or handle
+      const foundUser = await NetworkService.findProfileByPin(clean);
+
+      if (foundUser && onStartChatWithUser) {
+        sound.playSend();
+        setIsSearching(false);
+        onStartChatWithUser(foundUser);
+        return;
+      }
+
+      // 2. If not a registered profile, treat as secret anonymous room code
+      sound.playSend();
+      const roomId = `room_${clean}`;
+
+      if (supabase) {
         await supabase.from('chat_rooms').upsert({
           id: roomId,
-          code: clean,
+          code: clean.slice(0, 6),
           timer_seconds: 30,
           is_burn_on_read: false,
         });
-      } catch (err) {
-        console.warn('Upsert room failed:', err);
       }
+
+      NetworkService.broadcastPeerJoin(roomId, currentUser.handle, currentUser.displayName, currentUser.avatarId);
+
+      const room: ChatRoom = {
+        id: roomId,
+        code: clean.slice(0, 6),
+        participantCount: 2,
+        timerSeconds: 30,
+        isBurnOnRead: false,
+        peerHandle: `Room #${clean}`,
+        peerAvatarId: 5,
+      };
+      setIsSearching(false);
+      onEnterRoom(room);
+    } catch {
+      setIsSearching(false);
+      setErrorMsg('Could not connect. Please try again.');
+      sound.playPanic();
     }
-
-    NetworkService.broadcastPeerJoin(roomId, currentUser.handle, currentUser.displayName, currentUser.avatarId);
-
-    const room: ChatRoom = {
-      id: roomId,
-      code: clean,
-      participantCount: 2,
-      timerSeconds: 30,
-      isBurnOnRead: false,
-      peerHandle: `Room #${clean}`,
-      peerAvatarId: 5,
-    };
-    onEnterRoom(room);
   };
 
   return (
-    <div className="pb-32 pt-4 px-4 max-w-md mx-auto select-none font-sans min-h-screen bg-[#07080B] text-white">
-      {/* Header */}
-      <div className="mb-5">
+    <div className="pb-32 pt-3 px-4 max-w-md mx-auto select-none font-sans min-h-screen bg-[#07080B] text-white">
+      {/* Top Header */}
+      <div className="mb-4">
         <div className="flex items-center space-x-2">
-          <h1 className="font-black text-2xl tracking-tight text-white">
-            Secret PIN Room
+          <h1 className="font-extrabold text-2xl tracking-tight text-white">
+            Connect
           </h1>
           <span className="px-2 py-0.5 rounded-full bg-[#D4FF00]/10 text-[#D4FF00] text-[10px] font-mono font-bold border border-[#D4FF00]/25">
-            P2P DISCOVERY
+            PERSONAL PIN & QR
           </span>
         </div>
         <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-          Share your 6-digit PIN or scan QR. You connect together instantly with zero metadata saved.
+          Share your permanent 6-digit PIN or QR code to connect directly with zero tracking.
         </p>
       </div>
 
-      {/* Mode Switcher */}
-      <div className="flex rounded-2xl bg-[#0E1017] p-1 border border-white/[0.08] mb-6 shadow-inner">
+      {/* Mode Switcher Tabs */}
+      <div className="flex rounded-2xl bg-[#0E1017] p-1 border border-white/[0.08] mb-5 shadow-inner">
         <button
           onClick={() => {
             sound.vibrate(6);
@@ -190,7 +214,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
               : 'text-zinc-400 hover:text-white'
           }`}
         >
-          My Secret Code
+          My Personal PIN
         </button>
         <button
           onClick={() => {
@@ -203,69 +227,66 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
               : 'text-zinc-400 hover:text-white'
           }`}
         >
-          Enter Friend's PIN
+          Connect with Friend
         </button>
       </div>
 
       {mode === 'create' && (
-        <div className="rounded-[32px] bg-gradient-to-b from-[#0F121C] via-[#0B0D14] to-[#07080B] border border-white/[0.1] p-6 flex flex-col items-center text-center shadow-[0_20px_50px_rgba(0,0,0,0.8)] relative overflow-hidden animate-fade-in">
-          {/* Top Sheen Line */}
+        <div className="rounded-[28px] bg-gradient-to-b from-[#0F121C] via-[#0B0D14] to-[#07080B] border border-white/[0.1] p-5 flex flex-col items-center text-center shadow-2xl relative overflow-hidden animate-fade-in">
+          {/* Subtle Top Accent Line */}
           <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#D4FF00]/60 to-transparent" />
 
-          {/* 6-Digit PIN Display Card */}
+          {/* 6-Digit Personal PIN Display Box */}
           <div className="w-full bg-[#07080B] border border-white/[0.08] rounded-2xl p-4 mb-4 shadow-inner flex items-center justify-between">
             <div className="text-left">
-              <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block">
-                Session Room PIN
+              <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider block font-bold">
+                My Connection PIN
               </span>
-              <span className="font-mono text-3xl font-black text-[#D4FF00] tracking-widest drop-shadow-[0_0_15px_rgba(212,255,0,0.3)]">
-                {myCode}
+              <span className="font-mono text-3xl font-black text-[#D4FF00] tracking-wider drop-shadow-[0_0_15px_rgba(212,255,0,0.3)]">
+                {formattedPin}
+              </span>
+              <span className="text-[11px] font-mono text-zinc-400 block mt-0.5">
+                @{currentUser.handle}
               </span>
             </div>
 
             <div className="flex items-center space-x-1.5">
               <button
                 onClick={handleCopyCode}
-                className="p-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-zinc-200 active:scale-90 transition-all border border-white/[0.08]"
+                className="p-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-zinc-200 active:scale-90 transition-all border border-white/[0.08] flex items-center space-x-1"
                 title="Copy PIN"
               >
-                {copiedCode ? <Check className="w-4 h-4 text-[#D4FF00]" /> : <Copy className="w-4 h-4" />}
-              </button>
-              <button
-                onClick={handleGenerateNewCode}
-                className="p-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-zinc-200 active:scale-90 transition-all border border-white/[0.08]"
-                title="Generate New PIN"
-              >
-                <RefreshCw className="w-4 h-4" />
+                {copiedCode ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
+                <span className="text-[11px] font-bold">{copiedCode ? 'Copied' : 'Copy'}</span>
               </button>
             </div>
           </div>
 
-          {/* Radar Listening Badge */}
-          <div className="flex items-center space-x-2 mb-5 py-1.5 px-4 rounded-full bg-[#00F5A0]/10 border border-[#00F5A0]/30 text-[#00F5A0] text-xs font-mono font-bold">
+          {/* Live Listening Badge */}
+          <div className="flex items-center space-x-2 mb-4 py-1.5 px-3.5 rounded-full bg-[#00F5A0]/10 border border-[#00F5A0]/30 text-[#00F5A0] text-xs font-mono font-bold">
             <span className="w-2 h-2 rounded-full bg-[#00F5A0] animate-ping shrink-0" />
-            <span>Listening live • Auto-connects when friend joins</span>
+            <span>Ready • Connects automatically when friend types PIN</span>
           </div>
 
-          {/* High-Contrast QR Code Card */}
-          <div className="p-4 bg-white rounded-3xl mb-4 shadow-2xl relative group">
+          {/* High-Contrast Crisp QR Code Card */}
+          <div className="p-3.5 bg-white rounded-2xl mb-4 shadow-2xl relative group">
             <QRCodeSVG
               value={inviteUrl}
-              size={175}
+              size={170}
               bgColor="#ffffff"
               fgColor="#000000"
               level="M"
             />
           </div>
 
-          <p className="text-xs text-zinc-400 mb-6 max-w-xs leading-relaxed">
-            Your friend can scan this QR or type your 6-digit PIN. As soon as they type it, both of your screens open the chat simultaneously.
+          <p className="text-xs text-zinc-400 mb-5 max-w-xs leading-relaxed">
+            Your friend can scan this QR with their camera scanner or enter your PIN <span className="text-white font-mono font-bold">{myPin}</span> to chat directly.
           </p>
 
-          <div className="w-full space-y-2.5">
+          <div className="w-full space-y-2">
             <button
               onClick={handleEnterMyRoom}
-              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black text-xs font-black flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,255,0,0.3)]"
+              className="w-full py-3 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black text-xs font-black flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-md"
             >
               <KeyRound className="w-4 h-4" />
               <span>Enter Room & Wait Inside</span>
@@ -273,50 +294,70 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
             <button
               onClick={handleCopyLink}
-              className="w-full py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] text-white text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
+              className="w-full py-2.5 rounded-2xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] text-white text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
             >
-              {copiedLink ? <Check className="w-4 h-4 text-[#D4FF00]" /> : <Copy className="w-4 h-4" />}
-              <span>{copiedLink ? 'Invite Link Copied!' : 'Copy Direct Link'}</span>
+              {copiedLink ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedLink ? 'Link Copied to Clipboard!' : 'Copy Direct Link'}</span>
             </button>
           </div>
         </div>
       )}
 
       {mode === 'join' && (
-        <div className="rounded-[32px] bg-gradient-to-b from-[#0F121C] via-[#0B0D14] to-[#07080B] border border-white/[0.1] p-6 shadow-2xl relative overflow-hidden animate-fade-in text-center">
-          {/* Top Sheen */}
+        <div className="rounded-[28px] bg-gradient-to-b from-[#0F121C] via-[#0B0D14] to-[#07080B] border border-white/[0.1] p-5 shadow-2xl relative overflow-hidden animate-fade-in text-center">
+          {/* Subtle Accent Line */}
           <div className="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-transparent via-[#D4FF00]/60 to-transparent" />
 
-          <label className="block text-xs font-black text-zinc-300 mb-2 uppercase tracking-wider">
-            Enter Friend's 6-Digit PIN
+          <label className="block text-xs font-black text-zinc-300 mb-1.5 uppercase tracking-wider">
+            Enter Friend's 6-Digit PIN or @handle
           </label>
-          <p className="text-xs text-zinc-500 mb-5">
-            Both parties will enter the encrypted room instantly.
+          <p className="text-xs text-zinc-400 mb-4">
+            Type their code below to start a private encrypted chat instantly.
           </p>
 
           <input
             type="text"
-            maxLength={6}
+            inputMode="numeric"
+            maxLength={12}
             value={joinCode}
-            onChange={(e) => setJoinCode(e.target.value.replace(/\D/g, ''))}
+            onChange={(e) => setJoinCode(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && joinCode.trim().length === 6) {
+              if (e.key === 'Enter' && joinCode.trim().length >= 3) {
                 handleJoinByCode();
               }
             }}
-            placeholder="000000"
+            placeholder="000 000"
             autoFocus
-            className="w-full py-4 px-4 rounded-2xl bg-[#07080B] border border-white/[0.12] text-center font-mono text-3xl font-black tracking-[0.35em] text-[#D4FF00] placeholder-zinc-800 outline-none mb-5 shadow-inner focus:border-[#D4FF00]/80 transition-colors"
+            className="w-full py-3.5 px-4 rounded-2xl bg-[#07080B] border border-white/[0.12] text-center font-mono text-2xl font-black tracking-[0.25em] text-[#D4FF00] placeholder-zinc-700 outline-none mb-3 shadow-inner focus:border-[#D4FF00]/80 transition-colors"
           />
+
+          {errorMsg && (
+            <p className="text-xs text-red-400 font-mono mb-3">
+              {errorMsg}
+            </p>
+          )}
 
           <button
             onClick={handleJoinByCode}
-            disabled={joinCode.trim().length < 6}
-            className="w-full py-3.5 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black font-black text-xs flex items-center justify-center space-x-2 disabled:opacity-30 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,255,0,0.3)]"
+            disabled={isSearching || joinCode.trim().length < 3}
+            className="w-full py-3.5 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black font-black text-xs flex items-center justify-center space-x-2 disabled:opacity-30 active:scale-95 transition-all shadow-[0_0_20px_rgba(212,255,0,0.25)] mb-3"
           >
-            <span>Connect & Chat Now</span>
+            <span>{isSearching ? 'Connecting...' : 'Connect & Chat Now'}</span>
             <ArrowRight className="w-4 h-4 stroke-[3]" />
           </button>
+
+          {onOpenScanner && (
+            <button
+              onClick={() => {
+                sound.vibrate(8);
+                onOpenScanner();
+              }}
+              className="w-full py-2.5 rounded-2xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] text-zinc-200 text-xs font-bold flex items-center justify-center space-x-2 active:scale-95 transition-all"
+            >
+              <Camera className="w-4 h-4 text-[#D4FF00]" />
+              <span>Or Scan Friend's QR Code</span>
+            </button>
+          )}
         </div>
       )}
     </div>

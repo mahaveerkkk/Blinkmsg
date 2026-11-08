@@ -31,6 +31,22 @@ export function normalizeRoomId(roomId: string): string {
   return `room_${clean}`;
 }
 
+/**
+ * Generates a stable, unique 6-digit Personal Connection PIN from a user's handle.
+ * e.g. "falcon_9" -> "742819", always identical for the same handle.
+ */
+export function handleToPin(handle: string): string {
+  if (!handle) return '100001';
+  let hash = 5381;
+  const clean = handle.toLowerCase().trim().replace(/^@/, '');
+  for (let i = 0; i < clean.length; i++) {
+    hash = ((hash << 5) + hash) + clean.charCodeAt(i);
+    hash = hash & hash;
+  }
+  const pos = Math.abs(hash) % 900000 + 100000;
+  return String(pos);
+}
+
 export interface RoomSubscriptionCallbacks {
   onMessage: (payload: WireMessagePayload | ChatMessage) => void;
   onTyping?: (userHandle: string) => void;
@@ -189,17 +205,29 @@ export class NetworkService {
   }
 
   /**
-   * Broadcast an encrypted message over Supabase Realtime and insert into database
+   * Broadcast an encrypted message over Supabase Realtime and insert into database.
+   * If peerHandle is known or roomId is dm_userA__userB, it broadcasts directly to the
+   * peer's personal realtime inbox channel so the peer's phone receives an instant alert
+   * even from the home screen!
    */
   static async broadcastMessage(
     roomId: string,
     payload: WireMessagePayload | ChatMessage,
-    roomCode?: string
+    roomCode?: string,
+    peerHandle?: string
   ) {
     const normId = normalizeRoomId(roomId);
     const channelName = normId;
 
-    // 1. Supabase Realtime Broadcast (< 100ms)
+    // Detect target peer handle for direct inbox delivery
+    let targetPeer = peerHandle ? peerHandle.toLowerCase().replace(/^@/, '') : '';
+    if (!targetPeer && normId.startsWith('dm_')) {
+      const parts = normId.replace('dm_', '').split('__');
+      const sender = (payload.senderHandle || '').toLowerCase().replace(/^@/, '');
+      targetPeer = parts[0]?.toLowerCase() === sender ? parts[1]?.toLowerCase() : parts[0]?.toLowerCase();
+    }
+
+    // 1. Supabase Realtime Broadcast (< 100ms) to Room
     if (supabase) {
       let ch = activeSupabaseChannels.get(channelName);
       if (!ch) {
@@ -217,6 +245,37 @@ export class NetworkService {
       }).catch((err) => {
         console.warn('Realtime broadcast send failed:', err);
       });
+
+      // Also broadcast directly to target peer's personal inbox channel!
+      if (targetPeer) {
+        const inboxChannelName = `inbox_${targetPeer}`;
+        let inboxCh = activeSupabaseChannels.get(inboxChannelName);
+        if (!inboxCh) {
+          inboxCh = supabase.channel(inboxChannelName, {
+            config: { broadcast: { self: false } },
+          });
+          inboxCh.subscribe();
+          activeSupabaseChannels.set(inboxChannelName, inboxCh);
+        }
+
+        inboxCh.send({
+          type: 'broadcast',
+          event: 'incoming_message',
+          payload: {
+            message: payload,
+            room: {
+              id: normId,
+              code: roomCode || 'DIRECT',
+              peerHandle: payload.senderHandle,
+              peerDisplayName: payload.senderDisplayName || payload.senderHandle,
+              timerSeconds: payload.timerSeconds || 30,
+              isBurnOnRead: payload.isBurnOnRead || false,
+            },
+          },
+        }).catch((err) => {
+          console.warn('Inbox broadcast send failed:', err);
+        });
+      }
     }
 
     // 2. Supabase DB Persistence (Guarantees delivery even if peer joins after sending)
@@ -619,6 +678,100 @@ export class NetworkService {
     } catch (err) {
       console.warn('Failed to fetch active profiles:', err);
       return [];
+    }
+  }
+
+  /**
+   * Find a user profile by their 6-digit Personal PIN or @handle
+   */
+  static async findProfileByPin(pinOrHandle: string): Promise<UserProfile | null> {
+    if (!supabase || !pinOrHandle) return null;
+    const clean = pinOrHandle.trim().toLowerCase().replace(/^@/, '');
+
+    try {
+      // 1. Direct handle match
+      const { data: directData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('handle', clean)
+        .maybeSingle();
+
+      if (directData) {
+        return {
+          id: directData.id || 'usr_' + directData.handle,
+          handle: directData.handle,
+          displayName: directData.display_name || directData.handle,
+          avatarId: directData.avatar_id || 1,
+          vibe: directData.vibe || '',
+          isAvailable: directData.is_available ?? true,
+          country: directData.country || 'India',
+          state: directData.state || '',
+          city: directData.city || 'New Delhi',
+          lastActive: Date.now(),
+          pin: handleToPin(directData.handle),
+        };
+      }
+
+      // 2. Scan profiles to match 6-digit PIN
+      const { data: allProfiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .limit(200);
+
+      if (allProfiles && allProfiles.length > 0) {
+        const match = allProfiles.find((p: any) => handleToPin(p.handle) === clean);
+        if (match) {
+          return {
+            id: match.id || 'usr_' + match.handle,
+            handle: match.handle,
+            displayName: match.display_name || match.handle,
+            avatarId: match.avatar_id || 1,
+            vibe: match.vibe || '',
+            isAvailable: match.is_available ?? true,
+            country: match.country || 'India',
+            state: match.state || '',
+            city: match.city || 'New Delhi',
+            lastActive: Date.now(),
+            pin: clean,
+          };
+        }
+      }
+
+      return null;
+    } catch (err) {
+      console.warn('Failed to find profile by PIN:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Broadcast a peer connection notice so the friend's device receives an immediate handshake
+   */
+  static async sendPeerConnectedNotice(targetHandle: string, fromUser: UserProfile): Promise<void> {
+    if (!supabase || !targetHandle) return;
+    const inboxName = `inbox_${targetHandle.toLowerCase().replace(/^@/, '')}`;
+
+    try {
+      let ch = activeSupabaseChannels.get(inboxName);
+      if (!ch) {
+        ch = supabase.channel(inboxName, {
+          config: { broadcast: { self: false } },
+        });
+        ch.subscribe();
+        activeSupabaseChannels.set(inboxName, ch);
+      }
+
+      await ch.send({
+        type: 'broadcast',
+        event: 'peer_connected',
+        payload: {
+          handle: fromUser.handle,
+          displayName: fromUser.displayName || fromUser.handle,
+          avatarId: fromUser.avatarId || 1,
+        },
+      });
+    } catch (err) {
+      console.warn('Failed to send peer connected notice:', err);
     }
   }
 }

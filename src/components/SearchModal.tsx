@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Search, X, Lock, ArrowRight, Sparkles, ShieldCheck } from 'lucide-react';
 import { UserProfile } from '../types';
 import { Avatar } from './Avatar';
-import { supabase } from '../services/network';
+import { supabase, NetworkService } from '../services/network';
 import { sound } from '../services/sound';
 
 interface SearchModalProps {
@@ -35,7 +35,21 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
     setLoading(true);
 
-    // 1. Live Supabase Query
+    // 1. Check if user typed a 6-digit Personal Connection PIN
+    if (clean.length === 6 && /^\d+$/.test(clean)) {
+      try {
+        const pinUser = await NetworkService.findProfileByPin(clean);
+        if (pinUser) {
+          setSearchResults([pinUser]);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // continue to normal search
+      }
+    }
+
+    // 2. Live Supabase Query
     if (supabase) {
       try {
         const { data } = await supabase

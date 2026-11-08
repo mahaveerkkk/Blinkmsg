@@ -81,10 +81,88 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Background sync for incoming direct messages (e.g. when someone messages @currentUser)
+  // Background real-time inbox listener (< 100ms instant delivery from anywhere)
   useEffect(() => {
-    if (!currentUser?.handle) return;
+    if (!currentUser?.handle || !supabase) return;
 
+    const inboxChannelName = `inbox_${currentUser.handle.toLowerCase().replace(/^@/, '')}`;
+    const ch = supabase.channel(inboxChannelName, {
+      config: { broadcast: { self: false } },
+    });
+
+    ch.on('broadcast', { event: 'incoming_message' }, ({ payload }) => {
+      if (!payload || !payload.message) return;
+      const incomingMsg = payload.message;
+      const roomInfo = payload.room;
+
+      // Play audio & vibration
+      sound.playReceive();
+      sound.vibrate([25, 45, 25]);
+
+      const roomId = incomingMsg.roomId || roomInfo?.id;
+      const isCurrentlyOpen = activeRoom?.id === roomId;
+
+      setActiveRoomsList((prev) => {
+        const existing = prev.find((r) => r.id === roomId);
+        const updatedRoom: ChatRoom = existing
+          ? {
+              ...existing,
+              lastMessageText: incomingMsg.text || '📸 Ephemeral Photo',
+              lastMessageTime: incomingMsg.createdAt || Date.now(),
+              unreadCount: isCurrentlyOpen ? 0 : (existing.unreadCount || 0) + 1,
+              peerHandle: existing.peerHandle || incomingMsg.senderHandle,
+              peerDisplayName: existing.peerDisplayName || incomingMsg.senderDisplayName || incomingMsg.senderHandle,
+            }
+          : {
+              id: roomId,
+              code: roomInfo?.code || 'DIRECT',
+              participantCount: 2,
+              timerSeconds: incomingMsg.timerSeconds || 30,
+              isBurnOnRead: incomingMsg.isBurnOnRead || false,
+              peerHandle: incomingMsg.senderHandle,
+              peerDisplayName: incomingMsg.senderDisplayName || incomingMsg.senderHandle,
+              peerAvatarId: 3,
+              lastMessageText: incomingMsg.text || '📸 Ephemeral Photo',
+              lastMessageTime: incomingMsg.createdAt || Date.now(),
+              unreadCount: isCurrentlyOpen ? 0 : 1,
+            };
+
+        // Move to the very top of conversations
+        return [updatedRoom, ...prev.filter((r) => r.id !== roomId)];
+      });
+    });
+
+    ch.on('broadcast', { event: 'peer_connected' }, ({ payload }) => {
+      if (!payload || !payload.handle) return;
+      sound.playReceive();
+      sound.vibrate(20);
+
+      const sorted = [currentUser.handle.toLowerCase(), payload.handle.toLowerCase()].sort();
+      const dmRoomId = `dm_${sorted[0]}__${sorted[1]}`;
+
+      setActiveRoomsList((prev) => {
+        if (prev.some((r) => r.id === dmRoomId)) return prev;
+        const newRoom: ChatRoom = {
+          id: dmRoomId,
+          code: 'DIRECT',
+          participantCount: 2,
+          timerSeconds: 30,
+          isBurnOnRead: false,
+          peerHandle: payload.handle,
+          peerDisplayName: payload.displayName || payload.handle,
+          peerAvatarId: payload.avatarId || 3,
+          lastMessageText: 'Connected with personal PIN',
+          lastMessageTime: Date.now(),
+        };
+        return [newRoom, ...prev];
+      });
+    });
+
+    ch.subscribe((status) => {
+      console.log(`[Inbox Channel ${inboxChannelName}] status:`, status);
+    });
+
+    // Also sync DMs from database every 4 seconds as reliable persistence fallback
     const syncDMs = async () => {
       const dmRooms = await NetworkService.fetchUserDirectMessages(currentUser.handle);
       if (dmRooms.length > 0) {
@@ -104,9 +182,13 @@ export const App: React.FC = () => {
     };
 
     syncDMs();
-    const interval = setInterval(syncDMs, 3000);
-    return () => clearInterval(interval);
-  }, [currentUser?.handle]);
+    const interval = setInterval(syncDMs, 4000);
+
+    return () => {
+      clearInterval(interval);
+      if (ch && supabase) supabase.removeChannel(ch);
+    };
+  }, [currentUser?.handle, activeRoom?.id]);
 
   const handleUpdateProfile = (updated: Partial<UserProfile>) => {
     if (!currentUser) return;
@@ -149,6 +231,9 @@ export const App: React.FC = () => {
 
     setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
     setActiveRoom(room);
+
+    // Send instant live handshake alert to peer's inbox
+    NetworkService.sendPeerConnectedNotice(target.handle, currentUser);
   };
 
   const handleAcceptRequest = (req: BlinkRequest) => {
@@ -166,6 +251,11 @@ export const App: React.FC = () => {
     setBlinkRequests((prev) => prev.filter((r) => r.id !== req.id));
     setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
     setActiveRoom(room);
+
+    // Send instant live handshake alert to peer's inbox
+    if (currentUser) {
+      NetworkService.sendPeerConnectedNotice(req.fromUser.handle, currentUser);
+    }
   };
 
   const handleDeclineRequest = (reqId: string) => {
@@ -219,17 +309,23 @@ export const App: React.FC = () => {
 
     if (roomCode) {
       sound.playSend();
-      const room: ChatRoom = {
-        id: 'room_' + roomCode,
-        code: roomCode,
-        participantCount: 2,
-        timerSeconds: 30,
-        isBurnOnRead: false,
-        peerHandle: `Room #${roomCode}`,
-        peerAvatarId: 4,
-      };
-      setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
-      setActiveRoom(room);
+      NetworkService.findProfileByPin(roomCode).then((foundUser) => {
+        if (foundUser) {
+          handleStartChatWithUser(foundUser);
+        } else {
+          const room: ChatRoom = {
+            id: 'room_' + roomCode,
+            code: roomCode,
+            participantCount: 2,
+            timerSeconds: 30,
+            isBurnOnRead: false,
+            peerHandle: `Room #${roomCode}`,
+            peerAvatarId: 4,
+          };
+          setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
+          setActiveRoom(room);
+        }
+      });
       return;
     }
 
@@ -330,6 +426,8 @@ export const App: React.FC = () => {
               setActiveRoomsList((prev) => [room, ...prev.filter((r) => r.id !== room.id)]);
               setActiveRoom(room);
             }}
+            onStartChatWithUser={handleStartChatWithUser}
+            onOpenScanner={() => setIsScannerOpen(true)}
           />
         )}
 

@@ -27,15 +27,15 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       badge: unreadCount > 0 ? unreadCount : null,
     },
     {
-      id: 'radar' as ActiveTab,
-      label: 'Online',
-      icon: Radio,
+      id: 'vault' as ActiveTab,
+      label: 'Connect',
+      icon: KeyRound,
       badge: null,
     },
     {
-      id: 'vault' as ActiveTab,
-      label: 'Secret PIN',
-      icon: KeyRound,
+      id: 'radar' as ActiveTab,
+      label: 'Online',
+      icon: Radio,
       badge: null,
     },
     {
