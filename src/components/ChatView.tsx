@@ -100,7 +100,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
           const map = new Map<string, ChatMessage>();
           prev.forEach((m) => map.set(m.id, m));
           savedMsgs.forEach((m) => {
-            if (!map.has(m.id)) map.set(m.id, m);
+            if (!map.has(m.id)) {
+              // For receiver: countdown timer starts RIGHT NOW upon opening/reading the chat!
+              if (m.senderHandle !== currentUser.handle) {
+                if (m.timerSeconds > 0 && !m.isBurnOnRead) {
+                  m.expiresAt = Date.now() + m.timerSeconds * 1000;
+                  m.isRead = true;
+                }
+              }
+              map.set(m.id, m);
+            }
           });
           return Array.from(map.values());
         });
@@ -118,6 +127,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
     const unsubscribe = NetworkService.subscribeToRoom(room.id, {
       onMessage: (incoming: any) => {
         if (!incoming || !incoming.id) return;
+
+        // For receiver: if actively inside ChatView, timer starts as soon as displayed on screen!
+        if (incoming.senderHandle !== currentUser.handle) {
+          if (incoming.timerSeconds > 0 && !incoming.isBurnOnRead) {
+            incoming.expiresAt = Date.now() + incoming.timerSeconds * 1000;
+            incoming.isRead = true;
+          }
+        }
 
         setMessages((prev) => {
           if (prev.some((m) => m.id === incoming.id)) return prev;

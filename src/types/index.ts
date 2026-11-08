@@ -27,6 +27,8 @@ export interface ChatMessage {
   expiresAt: number; // timestamp when it burns (0 = burn on read waiting for reveal or off)
   isBurnOnRead: boolean;
   isRevealed?: boolean;
+  isRead?: boolean;
+  readAt?: number;
   status: MessageStatus;
   reaction?: string;
   isBurning?: boolean; // trigger flame animation

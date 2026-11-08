@@ -130,7 +130,7 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
   const handleJoinByCode = async () => {
     setErrorMsg('');
-    const clean = joinCode.trim().toLowerCase().replace(/^@/, '');
+    const clean = joinCode.trim().toLowerCase().replace(/[@\s-]/g, '');
     if (!clean || clean.length < 3) {
       setErrorMsg('Please enter a 6-digit PIN or @handle.');
       sound.playPanic();

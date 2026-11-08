@@ -290,9 +290,9 @@ export class NetworkService {
           is_burn_on_read: payload.isBurnOnRead || false,
         });
 
-        const expiresAtIso = payload.expiresAt && payload.expiresAt > 0
-          ? new Date(payload.expiresAt).toISOString()
-          : new Date(Date.now() + 86400000).toISOString(); // 24h default for burn-on-read waiting
+        // In database, keep message valid for 24h so receiver can open and read it anytime.
+        // The disappearance countdown only triggers on receiver's device once receiver actually reads it!
+        const expiresAtIso = new Date(Date.now() + 86400000).toISOString();
 
         const insertRow: any = {
           room_id: normId,
@@ -686,7 +686,7 @@ export class NetworkService {
    */
   static async findProfileByPin(pinOrHandle: string): Promise<UserProfile | null> {
     if (!supabase || !pinOrHandle) return null;
-    const clean = pinOrHandle.trim().toLowerCase().replace(/^@/, '');
+    const clean = pinOrHandle.trim().toLowerCase().replace(/[@\s-]/g, '');
 
     try {
       // 1. Direct handle match
