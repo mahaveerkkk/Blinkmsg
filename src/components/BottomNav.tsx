@@ -33,14 +33,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       badge: null,
     },
     {
-      id: 'radar' as ActiveTab,
-      label: 'Online',
-      icon: Radio,
-      badge: null,
-    },
-    {
       id: 'profile' as ActiveTab,
-      label: 'Profile',
+      label: 'Settings',
       icon: User,
       badge: null,
     },
