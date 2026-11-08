@@ -83,15 +83,6 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
           >
             <Search className="w-4 h-4" />
           </button>
-
-          {/* Discreet Panic Switch */}
-          <button
-            onClick={onTriggerPanic}
-            className="w-9 h-9 rounded-full bg-red-500/10 hover:bg-red-500/20 active:scale-90 transition-all flex items-center justify-center text-red-400"
-            title="Panic Purge"
-          >
-            <ShieldAlert className="w-4 h-4" />
-          </button>
         </div>
       </header>
 

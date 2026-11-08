@@ -283,21 +283,21 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
             Your friend can scan this QR with their camera scanner or enter your PIN <span className="text-white font-mono font-bold">{myPin}</span> to chat directly.
           </p>
 
-          <div className="w-full space-y-2">
+          <div className="w-full space-y-2.5">
             <button
-              onClick={handleEnterMyRoom}
-              className="w-full py-3 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black text-xs font-black flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-md"
+              onClick={handleCopyCode}
+              className="w-full py-3.5 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black text-xs font-black flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-md"
             >
-              <KeyRound className="w-4 h-4" />
-              <span>Enter Room & Wait Inside</span>
+              {copiedCode ? <Check className="w-4 h-4 text-black" /> : <Copy className="w-4 h-4" />}
+              <span>{copiedCode ? 'Code Copied to Clipboard!' : 'Copy My Connection Code'}</span>
             </button>
 
             <button
               onClick={handleCopyLink}
-              className="w-full py-2.5 rounded-2xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] text-white text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
+              className="w-full py-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.08] text-white text-xs font-bold flex items-center justify-center space-x-1.5 active:scale-95 transition-all"
             >
               {copiedLink ? <Check className="w-4 h-4 text-[#00F5A0]" /> : <Copy className="w-4 h-4" />}
-              <span>{copiedLink ? 'Link Copied to Clipboard!' : 'Copy Direct Link'}</span>
+              <span>{copiedLink ? 'Link Copied!' : 'Share Direct Chat Link'}</span>
             </button>
           </div>
         </div>
