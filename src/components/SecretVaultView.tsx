@@ -30,10 +30,9 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
 
   const formattedPin = myPin.length === 6 ? `${myPin.slice(0, 3)} - ${myPin.slice(3)}` : myPin;
 
-  // Listen live to user's personal room or inbox
+  // Ensure room exists in DB for this user's PIN
   useEffect(() => {
     if (mode !== 'create') return;
-
     const roomId = `room_${myPin}`;
 
     if (supabase) {
@@ -47,42 +46,6 @@ export const SecretVaultView: React.FC<SecretVaultViewProps> = ({
         })
         .then();
     }
-
-    const unsubscribe = NetworkService.subscribeToRoom(roomId, {
-      onPeerJoin: (peer) => {
-        sound.playReceive();
-        sound.vibrate([25, 50, 25]);
-
-        const room: ChatRoom = {
-          id: roomId,
-          code: myPin,
-          participantCount: 2,
-          timerSeconds: 30,
-          isBurnOnRead: false,
-          peerHandle: peer.handle,
-          peerDisplayName: peer.displayName || peer.handle,
-          peerAvatarId: peer.avatarId || 3,
-        };
-        onEnterRoom(room);
-      },
-      onMessage: (msg: any) => {
-        sound.playReceive();
-
-        const room: ChatRoom = {
-          id: roomId,
-          code: myPin,
-          participantCount: 2,
-          timerSeconds: 30,
-          isBurnOnRead: false,
-          peerHandle: msg.senderHandle || 'Friend',
-          peerDisplayName: msg.senderDisplayName || msg.senderHandle || 'Friend',
-          peerAvatarId: 3,
-        };
-        onEnterRoom(room);
-      },
-    });
-
-    return () => unsubscribe();
   }, [mode, myPin]);
 
   const handleCopyCode = () => {

@@ -399,7 +399,12 @@ export const App: React.FC = () => {
             currentUser={currentUser}
             activeRooms={activeRoomsList}
             blinkRequests={blinkRequests}
-            onOpenRoom={(room) => setActiveRoom(room)}
+            onOpenRoom={(room) => {
+              setActiveRoomsList((prev) =>
+                prev.map((r) => (r.id === room.id ? { ...r, unreadCount: 0 } : r))
+              );
+              setActiveRoom(room);
+            }}
             onAcceptRequest={handleAcceptRequest}
             onDeclineRequest={handleDeclineRequest}
             onClearRoom={handleClearRoom}
@@ -449,7 +454,9 @@ export const App: React.FC = () => {
       <BottomNav
         activeTab={activeTab}
         onTabChange={(tab) => setActiveTab(tab)}
-        unreadCount={blinkRequests.length}
+        unreadCount={
+          activeRoomsList.reduce((sum, r) => sum + (r.unreadCount || 0), 0) + blinkRequests.length
+        }
       />
 
       <SearchModal
