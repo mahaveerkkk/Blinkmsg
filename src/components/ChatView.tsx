@@ -6,12 +6,19 @@ import {
   Check,
   CheckCheck,
   Eye,
+  EyeOff,
   Trash2,
   Lock,
   ArrowUp,
   ShieldCheck,
   Camera,
-  AlertTriangle,
+  Mic,
+  Square,
+  Play,
+  Pause,
+  Fingerprint,
+  Sparkles,
+  Volume2,
 } from 'lucide-react';
 import { ChatMessage, ChatRoom, UserProfile } from '../types';
 import { Avatar } from './Avatar';
@@ -56,6 +63,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [inputText, setInputText] = useState('');
   const [currentTimer, setCurrentTimer] = useState(room.timerSeconds || 30);
   const [isBurnOnRead, setIsBurnOnRead] = useState(room.isBurnOnRead || false);
+  const [isStealthHoldMode, setIsStealthHoldMode] = useState(false);
   const [showTimerMenu, setShowTimerMenu] = useState(false);
   const [peerTyping, setPeerTyping] = useState(false);
   const [peerHandle, setPeerHandle] = useState(room.peerHandle || '');
@@ -64,6 +72,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
   const [screenshotToast, setScreenshotToast] = useState<string | null>(null);
   const [nowTime, setNowTime] = useState<number>(Date.now());
+
+  // Hold-to-Reveal State
+  const [holdingMsgId, setHoldingMsgId] = useState<string | null>(null);
+
+  // Voice Note Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -103,7 +124,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             if (!map.has(m.id)) {
               // For receiver: countdown timer starts RIGHT NOW upon opening/reading the chat!
               if (m.senderHandle !== currentUser.handle) {
-                if (m.timerSeconds > 0 && !m.isBurnOnRead) {
+                if (m.timerSeconds > 0 && !m.isBurnOnRead && !m.isHoldToReveal) {
                   m.expiresAt = Date.now() + m.timerSeconds * 1000;
                   m.isRead = true;
                 }
@@ -130,7 +151,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
         // For receiver: if actively inside ChatView, timer starts as soon as displayed on screen!
         if (incoming.senderHandle !== currentUser.handle) {
-          if (incoming.timerSeconds > 0 && !incoming.isBurnOnRead) {
+          if (incoming.timerSeconds > 0 && !incoming.isBurnOnRead && !incoming.isHoldToReveal) {
             incoming.expiresAt = Date.now() + incoming.timerSeconds * 1000;
             incoming.isRead = true;
           }
@@ -142,10 +163,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           return [...prev, incoming];
         });
 
-        // Send delivery ack back to sender:
-        // If burn-on-read and not revealed yet, send 'delivered'.
-        // If normal message, it's visible right now -> send 'read'!
-        const ackStatus = incoming.isBurnOnRead && !incoming.isRevealed ? 'delivered' : 'read';
+        const ackStatus = (incoming.isBurnOnRead || incoming.isHoldToReveal) && !incoming.isRevealed ? 'delivered' : 'read';
         NetworkService.broadcastDeliveryAck(room.id, incoming.id, ackStatus);
 
         // Resolve peer handle and displayName
@@ -215,16 +233,16 @@ export const ChatView: React.FC<ChatViewProps> = ({
         if (peer.handle && peer.handle !== currentUser.handle) {
           setPeerHandle(peer.handle);
           if (peer.displayName) setPeerDisplayName(peer.displayName);
-          setPeerAvatarId(peer.avatarId || 3);
+          if (peer.avatarId) setPeerAvatarId(peer.avatarId);
           sound.playReceive();
 
-          const cleanPeerName = peer.displayName || peer.handle.replace(/^@/, '');
+          const cleanPeerName = peer.displayName || peer.handle;
           const notice: ChatMessage = {
             id: 'sys_' + Date.now(),
             roomId: room.id,
             senderId: 'system',
             senderHandle: 'System',
-            text: `${cleanPeerName} connected to the room.`,
+            text: `${cleanPeerName} connected to the chat.`,
             createdAt: Date.now(),
             timerSeconds: 15,
             expiresAt: Date.now() + 15000,
@@ -254,7 +272,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         if (data.handle !== currentUser.handle) {
           sound.playPanic();
           const cleanName = peerDisplayName || data.handle.replace(/^@/, '');
-          setScreenshotToast(`⚠️ ${cleanName} attempted screenshot or switched window!`);
+          setScreenshotToast(`⚠️ ${cleanName} took screenshot or recorded screen!`);
           setTimeout(() => setScreenshotToast(null), 4000);
         }
       },
@@ -263,26 +281,41 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return () => unsubscribe();
   }, [room.id]);
 
-  // Master live countdown timer for message self-destruction & UI tick
+  // Master live countdown timer with CINEMATIC DISINTEGRATION
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
       setNowTime(now);
 
       setMessages((prev) => {
-        let hasExpired = false;
-        const next = prev.filter((msg) => {
-          if (msg.senderId === 'system') return true;
-          if (msg.isBurnOnRead && !msg.isRevealed) return true;
+        let hasChanges = false;
+        const next = prev.map((msg) => {
+          if (msg.senderId === 'system') return msg;
+          if ((msg.isBurnOnRead || msg.isHoldToReveal) && !msg.isRevealed) return msg;
+
+          // Check if message reached expiration
           if (msg.expiresAt && now >= msg.expiresAt) {
-            hasExpired = true;
+            if (!msg.isBurning) {
+              sound.playBurn();
+              hasChanges = true;
+              return { ...msg, isBurning: true };
+            }
+          }
+          return msg;
+        });
+
+        return hasChanges ? next : prev;
+      });
+
+      // Filter out messages that finished burning animation (after 450ms)
+      setMessages((prev) => {
+        const stillAlive = prev.filter((msg) => {
+          if (msg.isBurning && msg.expiresAt && now >= msg.expiresAt + 450) {
             return false;
           }
           return true;
         });
-
-        if (hasExpired) sound.playBurn();
-        return hasExpired ? next : prev;
+        return stillAlive.length !== prev.length ? stillAlive : prev;
       });
     }, 250);
 
@@ -317,13 +350,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, peerTyping]);
 
-  const handleSendMessage = (customText?: string, mediaUrl?: string) => {
+  const handleSendMessage = (customText?: string, mediaUrl?: string, audioUrl?: string, audioDuration?: number) => {
     const textToSend = (customText !== undefined ? customText : inputText).trim();
-    if (!textToSend && !mediaUrl) return;
+    if (!textToSend && !mediaUrl && !audioUrl) return;
 
     sound.playSend();
 
-    const expiresAt = isBurnOnRead ? 0 : Date.now() + currentTimer * 1000;
+    const expiresAt = isBurnOnRead || isStealthHoldMode ? 0 : Date.now() + currentTimer * 1000;
 
     const newMsg: ChatMessage = {
       id: generateUUID(),
@@ -331,12 +364,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
       senderId: currentUser.id,
       senderHandle: currentUser.handle,
       senderDisplayName: currentUser.displayName,
-      text: textToSend || (mediaUrl ? '📸 Photo' : ''),
+      text: textToSend || (mediaUrl ? '📸 Photo' : (audioUrl ? '🎙️ Voice Note' : '')),
       mediaUrl,
+      audioUrl,
+      audioDuration,
       createdAt: Date.now(),
       timerSeconds: currentTimer,
       expiresAt,
-      isBurnOnRead,
+      isBurnOnRead: isBurnOnRead || isStealthHoldMode,
+      isHoldToReveal: isStealthHoldMode,
       status: 'sent',
     };
 
@@ -375,31 +411,117 @@ export const ChatView: React.FC<ChatViewProps> = ({
     setMessages((prev) => [...prev, notice]);
   };
 
-  const handleRevealBurnOnRead = (msgId: string) => {
-    sound.vibrate(15);
-    const expiresAt = Date.now() + 6000;
+  // Hold-to-Reveal Handlers
+  const handleHoldStart = (msgId: string) => {
+    sound.playHoldPulse();
+    setHoldingMsgId(msgId);
+  };
+
+  const handleHoldEnd = (msg: ChatMessage) => {
+    setHoldingMsgId(null);
+    sound.playBurn();
+
+    // Immediately trigger disintegration upon releasing finger
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === msgId
+        m.id === msg.id
           ? {
               ...m,
               isRevealed: true,
-              expiresAt,
+              isBurning: true,
+              expiresAt: Date.now() + 350,
             }
           : m
       )
     );
-    NetworkService.broadcastBurnReveal(room.id, msgId, expiresAt);
-    NetworkService.broadcastDeliveryAck(room.id, msgId, 'read');
+    NetworkService.broadcastBurnReveal(room.id, msg.id, Date.now() + 350);
   };
 
-  const handleSelectReaction = (msgId: string, emoji: string) => {
-    sound.vibrate(6);
-    setMessages((prev) =>
-      prev.map((m) => (m.id === msgId ? { ...m, reaction: emoji } : m))
-    );
-    setActiveReactionMsgId(null);
-    NetworkService.broadcastReaction(room.id, msgId, emoji);
+  // Voice Note Recording with MediaRecorder
+  const handleStartVoiceRecord = async () => {
+    try {
+      sound.vibrate(15);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64Audio = reader.result as string;
+          handleSendMessage('', undefined, base64Audio, recordSeconds || 3);
+        };
+        reader.readAsDataURL(audioBlob);
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordSeconds(0);
+
+      recordTimerRef.current = setInterval(() => {
+        setRecordSeconds((prev) => prev + 1);
+      }, 1000);
+    } catch {
+      alert('Microphone access required for Voice Notes.');
+    }
+  };
+
+  const handleStopVoiceRecord = (cancel = false) => {
+    sound.vibrate(10);
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    setIsRecording(false);
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      if (cancel) {
+        audioChunksRef.current = [];
+        mediaRecorderRef.current.stop();
+      } else {
+        mediaRecorderRef.current.stop();
+      }
+    }
+  };
+
+  // Voice Note Play Once & Vaporize
+  const handlePlayVoice = (msg: ChatMessage) => {
+    if (!msg.audioUrl) return;
+    sound.vibrate(8);
+
+    if (playingAudioId === msg.id) {
+      audioPlayerRef.current?.pause();
+      setPlayingAudioId(null);
+      return;
+    }
+
+    if (audioPlayerRef.current) {
+      audioPlayerRef.current.pause();
+    }
+
+    const audio = new Audio(msg.audioUrl);
+    audioPlayerRef.current = audio;
+    setPlayingAudioId(msg.id);
+
+    audio.onended = () => {
+      setPlayingAudioId(null);
+      sound.playBurn();
+
+      // Disintegrate after listening once!
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id
+            ? { ...m, isBurning: true, expiresAt: Date.now() + 350 }
+            : m
+        )
+      );
+    };
+
+    audio.play().catch(() => {});
   };
 
   // Ephemeral Photo Compression & Upload
@@ -480,7 +602,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </div>
         </div>
 
-        {/* Right Actions: Timer Pill & Delete */}
+        {/* Right Actions: Timer Pill */}
         <div className="flex items-center space-x-2 shrink-0">
           <div className="relative">
             <button
@@ -517,35 +639,22 @@ export const ChatView: React.FC<ChatViewProps> = ({
               </div>
             )}
           </div>
-
-          <button
-            onClick={() => {
-              sound.playPanic();
-              onLeaveRoom();
-            }}
-            className="p-2 rounded-full text-zinc-400 hover:text-red-400 active:scale-90 transition-all hover:bg-red-500/10"
-            title="Leave & Purge"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
         </div>
       </header>
 
-      {/* Screenshot / Tab Warning Toast */}
+      {/* Screenshot Warning Toast */}
       {screenshotToast && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center justify-center space-x-2 text-xs text-amber-300 animate-fade-in z-20">
-          <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-          <span className="font-semibold">{screenshotToast}</span>
+        <div className="absolute top-16 left-4 right-4 z-40 bg-red-950/90 border border-red-500/50 text-red-200 p-3 rounded-2xl text-xs font-mono text-center shadow-2xl animate-fade-in backdrop-blur-xl">
+          {screenshotToast}
         </div>
       )}
 
       {/* Messages Canvas */}
-      <div className="flex-1 overflow-y-auto px-3.5 py-4 space-y-3 z-10">
+      <div className="flex-1 overflow-y-auto px-3.5 py-4 space-y-3 relative">
         {messages.map((msg) => {
-          const isMe = msg.senderId === currentUser.id;
-          const isSystem = msg.senderId === 'system';
+          const isMe = msg.senderHandle === currentUser.handle;
 
-          if (isSystem) {
+          if (msg.senderId === 'system') {
             return (
               <div key={msg.id} className="flex justify-center my-3">
                 <span className="px-3.5 py-1.5 rounded-full bg-white/[0.04] backdrop-blur-md border border-white/[0.06] text-[11px] text-zinc-400 text-center max-w-xs flex items-center space-x-1.5 shadow-sm font-medium">
@@ -558,164 +667,166 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
           const timeLeftMs = msg.expiresAt ? Math.max(0, msg.expiresAt - nowTime) : 0;
           const timeLeftSec = Math.ceil(timeLeftMs / 1000);
-          const totalDurationMs = (msg.timerSeconds || 30) * 1000;
-          const progressPercent = msg.expiresAt
-            ? Math.min(100, Math.max(0, (timeLeftMs / totalDurationMs) * 100))
-            : 100;
+          const isHoldingThis = holdingMsgId === msg.id;
 
           return (
             <div
               key={msg.id}
-              className={`relative flex flex-col ${isMe ? 'items-end' : 'items-start'} group transition-all duration-200`}
+              className={`relative flex flex-col ${isMe ? 'items-end' : 'items-start'} group transition-all duration-200 ${
+                msg.isBurning ? 'animate-disintegrate' : ''
+              }`}
             >
+              {/* Message Capsule */}
               <div
-                onClick={() => setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)}
-                className={`relative max-w-[82%] px-3.5 py-2.5 text-[14.5px] leading-[1.42] tracking-[-0.01em] shadow-md cursor-pointer transition-transform active:scale-[0.99] ${
+                className={`relative max-w-[85%] px-3.5 py-2.5 text-[14.5px] leading-[1.42] shadow-md transition-all ${
                   isMe
                     ? 'bg-gradient-to-br from-[#0e4230] via-[#0b3325] to-[#08261c] text-white border border-[#25D366]/25 shadow-emerald-950/40 rounded-[20px] rounded-br-[4px]'
                     : 'bg-gradient-to-br from-[#1a1c24] to-[#121319] text-[#ececf1] border border-white/[0.08] shadow-black/50 rounded-[20px] rounded-bl-[4px]'
                 }`}
               >
-                {/* Ephemeral Photo Bubble */}
-                {msg.mediaUrl && (
-                  <div className="mb-2 rounded-xl overflow-hidden max-w-[260px] shadow-inner relative">
-                    {msg.isBurnOnRead && !msg.isRevealed && !isMe ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRevealBurnOnRead(msg.id);
-                        }}
-                        className="w-full h-36 bg-black/80 flex flex-col items-center justify-center p-4 border border-amber-500/30 rounded-xl text-center active:scale-95 transition-transform"
-                      >
-                        <Flame className="w-7 h-7 text-amber-400 mb-1.5 fill-amber-400 animate-pulse" />
-                        <span className="text-xs font-bold text-amber-300">Tap to View Photo</span>
-                        <span className="text-[10px] text-zinc-500 mt-0.5">Burns in 6 seconds</span>
-                      </button>
+                {/* 1. HOLD TO REVEAL PRIVACY SHIELD (For secret photos & secret text) */}
+                {(msg.isHoldToReveal || (msg.isBurnOnRead && !isMe)) && !msg.isRevealed ? (
+                  <div
+                    onMouseDown={() => handleHoldStart(msg.id)}
+                    onMouseUp={() => handleHoldEnd(msg)}
+                    onTouchStart={() => handleHoldStart(msg.id)}
+                    onTouchEnd={() => handleHoldEnd(msg)}
+                    className="relative p-4 rounded-2xl bg-black/70 border border-white/[0.12] flex flex-col items-center justify-center text-center cursor-pointer select-none active:scale-95 transition-transform overflow-hidden min-w-[210px]"
+                  >
+                    {isHoldingThis ? (
+                      /* Revealed state while thumb is pressed down */
+                      <div className="relative animate-fade-in w-full">
+                        {msg.mediaUrl ? (
+                          <img
+                            src={msg.mediaUrl}
+                            alt="Revealed"
+                            className="w-full max-h-64 object-cover rounded-xl"
+                          />
+                        ) : (
+                          <p className="text-sm font-medium text-white break-words py-2">{msg.text}</p>
+                        )}
+                        {/* Dynamic Anti-Recording Watermark */}
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">
+                          <span className="font-mono text-xs text-white rotate-[-25deg] tracking-widest uppercase">
+                            @{currentUser.handle} • CONFIDENTIAL
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-red-400 font-mono font-bold mt-2 block animate-pulse">
+                          Release finger to disintegrate
+                        </span>
+                      </div>
                     ) : (
-                      <div className="relative">
+                      /* Frosted Privacy Shield */
+                      <div className="flex flex-col items-center py-2">
+                        <div className="w-12 h-12 rounded-full bg-[#D4FF00]/10 border border-[#D4FF00]/30 flex items-center justify-center text-[#D4FF00] mb-2 animate-fingerprint">
+                          <Fingerprint className="w-7 h-7" />
+                        </div>
+                        <span className="text-xs font-black tracking-wider text-white uppercase">
+                          HOLD TO REVEAL
+                        </span>
+                        <span className="text-[10px] text-zinc-400 mt-0.5 font-mono">
+                          Fingerprint privacy shield
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    {/* Ephemeral Photo Bubble */}
+                    {msg.mediaUrl && (
+                      <div className="mb-2 rounded-xl overflow-hidden max-w-[260px] shadow-inner relative">
                         <img
                           src={msg.mediaUrl}
                           alt="Ephemeral"
                           className="w-full max-h-64 object-cover rounded-xl"
                         />
-                        {msg.isBurnOnRead && msg.isRevealed && (
-                          <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/80 backdrop-blur-md border border-red-500/50 text-red-400 text-[10px] font-mono font-bold flex items-center space-x-1 animate-pulse">
-                            <Flame className="w-3 h-3 fill-red-400" />
-                            <span>Burns in {timeLeftSec}s</span>
-                          </div>
-                        )}
                       </div>
                     )}
-                  </div>
-                )}
 
-                {/* Burn On Read Shield Cover */}
-                {msg.isBurnOnRead && !msg.isRevealed && !isMe && !msg.mediaUrl ? (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleRevealBurnOnRead(msg.id);
-                    }}
-                    className="w-full p-2.5 rounded-xl bg-gradient-to-r from-amber-500/10 via-black/40 to-amber-500/10 border border-amber-500/30 flex items-center space-x-2.5 text-left active:scale-95 transition-transform"
-                  >
-                    <div className="w-7 h-7 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
-                      <Flame className="w-4 h-4 text-amber-400 fill-amber-400 animate-pulse" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-amber-200">Confidential Message</p>
-                      <p className="text-[10px] text-amber-400/80">Tap to view (burns in 6s)</p>
-                    </div>
-                    <Eye className="w-4 h-4 text-amber-400 shrink-0" />
-                  </button>
-                ) : (
-                  <div className="break-words">
-                    <span>{msg.text}</span>
-
-                    {/* Inline Telegram-style timestamp, LIVE COUNTDOWN & status */}
-                    <span className="inline-flex items-center space-x-1.5 float-right ml-2.5 mt-1 -mb-0.5 select-none text-[10.5px] font-mono text-zinc-400/80">
-                      {/* LIVE COUNTDOWN TICKER */}
-                      {msg.expiresAt > 0 && (!msg.isBurnOnRead || msg.isRevealed) && (
-                        <span
-                          className={`inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded font-mono text-[10px] font-bold select-none transition-colors ${
-                            timeLeftSec <= 5
-                              ? 'bg-red-500/25 text-red-400 border border-red-500/40 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.35)]'
-                              : 'bg-black/30 text-[#D4FF00] border border-[#D4FF00]/30'
-                          }`}
+                    {/* Disappearing Voice Note Capsule ("Listen Once") */}
+                    {msg.audioUrl && (
+                      <div className="mb-2 p-2.5 rounded-2xl bg-black/40 border border-white/[0.08] flex items-center space-x-3 min-w-[200px]">
+                        <button
+                          onClick={() => handlePlayVoice(msg)}
+                          className="w-9 h-9 rounded-full bg-[#D4FF00] text-black flex items-center justify-center active:scale-90 transition-transform shrink-0 shadow-md"
                         >
-                          {timeLeftSec <= 5 ? (
-                            <Flame className="w-2.5 h-2.5 fill-red-400 text-red-400 animate-bounce mr-0.5" />
+                          {playingAudioId === msg.id ? (
+                            <Pause className="w-4 h-4 fill-black" />
                           ) : (
-                            <span className="text-[9px] mr-0.5">⏱</span>
+                            <Play className="w-4 h-4 fill-black ml-0.5" />
                           )}
-                          <span>{timeLeftSec}s</span>
-                        </span>
-                      )}
+                        </button>
 
-                      {msg.isBurnOnRead && !msg.isRevealed && (
-                        <span className="flex items-center text-amber-400 font-bold px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-[10px]">
-                          <Flame className="w-2.5 h-2.5 fill-current mr-0.5" />
-                          burn
-                        </span>
-                      )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 mb-1">
+                            <span className="font-bold text-white flex items-center space-x-1">
+                              <Volume2 className="w-3 h-3 text-[#D4FF00]" />
+                              <span>Voice Note</span>
+                            </span>
+                            <span>{msg.audioDuration ? `${msg.audioDuration}s` : '0:03'}</span>
+                          </div>
 
-                      {isMe && (
-                        <span className="inline-block translate-y-[1px]">
-                          {msg.status === 'sent' && (
-                            <Check className="w-3 h-3 text-zinc-400" />
-                          )}
-                          {msg.status === 'delivered' && (
-                            <CheckCheck className="w-3 h-3 text-zinc-400" />
-                          )}
-                          {msg.status === 'read' && (
-                            <CheckCheck className="w-3.5 h-3.5 text-[#D4FF00]" />
-                          )}
-                        </span>
-                      )}
-                    </span>
+                          {/* Animated Voice Waveform */}
+                          <div className="flex items-center space-x-1 h-3">
+                            {[4, 10, 6, 14, 8, 12, 5, 11, 7, 13, 6, 9].map((height, idx) => (
+                              <div
+                                key={idx}
+                                className={`w-1 rounded-full transition-all duration-200 ${
+                                  playingAudioId === msg.id ? 'bg-[#D4FF00] animate-pulse' : 'bg-white/20'
+                                }`}
+                                style={{ height: `${height}px` }}
+                              />
+                            ))}
+                          </div>
 
-                    {/* Self-destruction Live Burning Fuse Bar */}
-                    {msg.expiresAt > 0 && (!msg.isBurnOnRead || msg.isRevealed) && (
-                      <div className="w-full h-[2px] bg-black/40 rounded-full overflow-hidden mt-1.5 clear-both">
-                        <div
-                          className={`h-full rounded-full transition-all duration-200 ${
-                            timeLeftSec <= 5
-                              ? 'bg-gradient-to-r from-red-500 to-amber-500 shadow-[0_0_6px_#ef4444]'
-                              : 'bg-gradient-to-r from-[#D4FF00] to-[#00F5A0]'
-                          }`}
-                          style={{ width: `${progressPercent}%` }}
-                        />
+                          <span className="text-[9px] text-amber-400 font-mono mt-1 block font-bold">
+                            🎧 Listen Once • Burns after playing
+                          </span>
+                        </div>
                       </div>
                     )}
-                  </div>
-                )}
 
-                {/* Emoji Reaction Badge on Message Corner */}
-                {msg.reaction && (
-                  <div className="absolute -bottom-2.5 right-2 px-1.5 py-0.5 rounded-full bg-[#181920] border border-white/10 text-xs shadow-md animate-pop-in">
-                    {msg.reaction}
-                  </div>
+                    {/* Standard Text Bubble */}
+                    {msg.text && !msg.audioUrl && (
+                      <div className="break-words">
+                        <span>{msg.text}</span>
+
+                        {/* Inline timestamp & LIVE COUNTDOWN */}
+                        <span className="inline-flex items-center space-x-1.5 float-right ml-2.5 mt-1 -mb-0.5 select-none text-[10.5px] font-mono text-zinc-400/80">
+                          {msg.expiresAt > 0 && (
+                            <span
+                              className={`inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded font-mono text-[10px] font-bold select-none transition-colors ${
+                                timeLeftSec <= 5
+                                  ? 'bg-red-500/25 text-red-400 border border-red-500/40 animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.35)]'
+                                  : 'bg-black/30 text-[#D4FF00] border border-[#D4FF00]/30'
+                              }`}
+                            >
+                              {timeLeftSec <= 5 ? (
+                                <Flame className="w-2.5 h-2.5 fill-red-400 text-red-400 animate-bounce mr-0.5" />
+                              ) : (
+                                <span className="text-[9px] mr-0.5">⏱</span>
+                              )}
+                              <span>{timeLeftSec}s</span>
+                            </span>
+                          )}
+
+                          {isMe && (
+                            <span className="ml-1">
+                              {msg.status === 'read' ? (
+                                <CheckCheck className="w-3.5 h-3.5 text-[#00F5A0] stroke-[2.5]" />
+                              ) : msg.status === 'delivered' ? (
+                                <CheckCheck className="w-3.5 h-3.5 text-zinc-400 stroke-[2]" />
+                              ) : (
+                                <Check className="w-3.5 h-3.5 text-zinc-500 stroke-[2]" />
+                              )}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
-
-              {/* Quick Emoji Reaction Bar (Shows on Tap) */}
-              {activeReactionMsgId === msg.id && (
-                <div
-                  onClick={(e) => e.stopPropagation()}
-                  className={`flex items-center space-x-1.5 mt-1.5 p-1 rounded-full bg-[#161820] border border-white/10 shadow-2xl z-20 animate-pop-in ${
-                    isMe ? 'mr-1' : 'ml-1'
-                  }`}
-                >
-                  {EMOJI_REACTIONS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      onClick={() => handleSelectReaction(msg.id, emoji)}
-                      className="w-7 h-7 flex items-center justify-center text-sm hover:scale-125 active:scale-90 transition-transform"
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           );
         })}
@@ -732,10 +843,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Floating Bottom Input Bar (iOS / Telegram Style) */}
+      {/* Floating Bottom Input Bar */}
       <div className="p-3 bg-[#07080B]/95 backdrop-blur-2xl border-t border-white/[0.08] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] z-20">
         <div className="flex items-center space-x-2 max-w-lg mx-auto">
-          {/* Hidden File Input for Ephemeral Photos */}
+          {/* Ephemeral Photo Input */}
           <input
             type="file"
             ref={fileInputRef}
@@ -752,28 +863,74 @@ export const ChatView: React.FC<ChatViewProps> = ({
             <Camera className="w-5 h-5 text-zinc-300" />
           </button>
 
-          <div className="flex-1 bg-[#11141D] border border-white/[0.08] focus-within:border-[#D4FF00]/50 rounded-full px-4 py-2 flex items-center transition-all shadow-inner">
-            <input
-              type="text"
-              value={inputText}
-              onChange={(e) => handleTyping(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Confidential message..."
-              className="w-full bg-transparent text-[14.5px] text-white placeholder-zinc-500 outline-none font-medium"
-            />
-          </div>
-
+          {/* Stealth Hold-to-Reveal Toggle */}
           <button
-            onClick={() => handleSendMessage()}
-            disabled={!inputText.trim()}
-            className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all duration-200 active:scale-90 shrink-0 ${
-              inputText.trim()
-                ? 'bg-[#D4FF00] hover:bg-[#c4ed00] text-black shadow-[0_0_15px_rgba(212,255,0,0.35)] scale-100 cursor-pointer'
-                : 'bg-[#11141D] text-zinc-600 border border-white/[0.06] scale-95 opacity-50 cursor-not-allowed'
+            onClick={() => {
+              sound.vibrate(8);
+              setIsStealthHoldMode(!isStealthHoldMode);
+            }}
+            className={`w-10 h-10 rounded-full border flex items-center justify-center active:scale-90 transition-all shrink-0 shadow-sm ${
+              isStealthHoldMode
+                ? 'bg-[#D4FF00]/20 border-[#D4FF00] text-[#D4FF00] shadow-[0_0_12px_rgba(212,255,0,0.3)]'
+                : 'bg-[#11141D] border-white/[0.08] text-zinc-400 hover:text-zinc-200'
             }`}
+            title="Toggle Hold-to-Reveal Stealth Shield"
           >
-            <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+            <Fingerprint className="w-5 h-5" />
           </button>
+
+          {/* Voice Recording / Input Bar */}
+          {isRecording ? (
+            <div className="flex-1 bg-red-950/40 border border-red-500/40 rounded-full px-4 py-2 flex items-center justify-between animate-pulse">
+              <div className="flex items-center space-x-2 text-red-400 font-mono text-xs">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                <span>Recording Secret Audio: {recordSeconds}s</span>
+              </div>
+              <button
+                onClick={() => handleStopVoiceRecord(true)}
+                className="text-xs text-zinc-400 hover:text-white uppercase font-mono"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div className="flex-1 bg-[#11141D] border border-white/[0.08] focus-within:border-[#D4FF00]/50 rounded-full px-4 py-2 flex items-center transition-all shadow-inner">
+              <input
+                type="text"
+                value={inputText}
+                onChange={(e) => handleTyping(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                placeholder={isStealthHoldMode ? 'Hold-to-Reveal message...' : 'Confidential message...'}
+                className="w-full bg-transparent text-[14.5px] text-white placeholder-zinc-500 outline-none font-medium"
+              />
+            </div>
+          )}
+
+          {/* Send or Voice Record Action */}
+          {inputText.trim() ? (
+            <button
+              onClick={() => handleSendMessage()}
+              className="w-10 h-10 rounded-full bg-[#D4FF00] hover:bg-[#c4ed00] text-black shadow-[0_0_15px_rgba(212,255,0,0.35)] flex items-center justify-center font-bold active:scale-90 transition-all shrink-0 cursor-pointer"
+            >
+              <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+            </button>
+          ) : isRecording ? (
+            <button
+              onClick={() => handleStopVoiceRecord(false)}
+              className="w-10 h-10 rounded-full bg-red-500 hover:bg-red-400 text-white shadow-[0_0_15px_rgba(239,68,68,0.4)] flex items-center justify-center active:scale-90 transition-all shrink-0"
+              title="Send Voice Note"
+            >
+              <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+            </button>
+          ) : (
+            <button
+              onClick={handleStartVoiceRecord}
+              className="w-10 h-10 rounded-full bg-[#11141D] hover:bg-[#181D2A] border border-white/[0.08] text-zinc-300 hover:text-[#D4FF00] flex items-center justify-center active:scale-90 transition-all shrink-0 shadow-sm"
+              title="Record Disappearing Voice Note"
+            >
+              <Mic className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -14,12 +14,16 @@ import { ProfileView } from './components/ProfileView';
 import { PanicModal } from './components/PanicModal';
 import { SplashScreen } from './components/SplashScreen';
 import { QRScannerModal } from './components/QRScannerModal';
+import { AppLockOverlay } from './components/AppLockOverlay';
 
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() =>
     StorageService.getProfile()
   );
   const [showSplash, setShowSplash] = useState<boolean>(!StorageService.getProfile());
+  const [isLocked, setIsLocked] = useState<boolean>(() => {
+    return localStorage.getItem('blink_app_lock_active') === 'true';
+  });
   const [activeTab, setActiveTab] = useState<ActiveTab>('chats');
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(null);
   const [activeRoomsList, setActiveRoomsList] = useState<ChatRoom[]>(() =>
@@ -54,6 +58,19 @@ export const App: React.FC = () => {
       NetworkService.syncProfileToSupabase(currentUser);
     }
   }, [currentUser?.handle]);
+
+  // Auto-lock when minimized/backgrounded if Stealth App Lock is enabled
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      const isLockEnabled = localStorage.getItem('blink_app_lock_enabled') === 'true';
+      if (document.visibilityState === 'hidden' && isLockEnabled && currentUser) {
+        setIsLocked(true);
+        localStorage.setItem('blink_app_lock_active', 'true');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [currentUser]);
 
   // Deep-link join handling (e.g. /#room=123456)
   useEffect(() => {
@@ -476,6 +493,16 @@ export const App: React.FC = () => {
         isOpen={isPanicOpen}
         onExitPanic={() => setIsPanicOpen(false)}
       />
+
+      {isLocked && currentUser && !showSplash && (
+        <AppLockOverlay
+          currentUser={currentUser}
+          onUnlock={() => {
+            setIsLocked(false);
+            localStorage.removeItem('blink_app_lock_active');
+          }}
+        />
+      )}
     </div>
   );
 };

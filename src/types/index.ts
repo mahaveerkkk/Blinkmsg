@@ -22,10 +22,13 @@ export interface ChatMessage {
   senderDisplayName?: string;
   text: string;
   mediaUrl?: string; // Encrypted / ephemeral image data URL
+  audioUrl?: string; // Encrypted / ephemeral voice note data URL
+  audioDuration?: number; // voice note duration in seconds
   createdAt: number;
   timerSeconds: number; // e.g. 0 (off), 10, 30, 60, 300
   expiresAt: number; // timestamp when it burns (0 = burn on read waiting for reveal or off)
   isBurnOnRead: boolean;
+  isHoldToReveal?: boolean; // Requires holding finger to unveil
   isRevealed?: boolean;
   isRead?: boolean;
   readAt?: number;
@@ -48,9 +51,12 @@ export interface WireMessagePayload {
   timerSeconds: number;
   expiresAt: number;
   isBurnOnRead: boolean;
+  isHoldToReveal?: boolean;
   status: MessageStatus;
   reaction?: string;
   mediaUrl?: string;
+  audioUrl?: string;
+  audioDuration?: number;
 }
 
 export interface ChatRoom {

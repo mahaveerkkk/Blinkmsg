@@ -17,6 +17,7 @@ import {
   VolumeX,
   Ghost,
   Sparkles,
+  Lock,
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { UserProfile } from '../types';
@@ -48,6 +49,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [defaultTimer, setDefaultTimer] = useState<number>(30);
   const [isGhostMode, setIsGhostMode] = useState<boolean>(!currentUser.isAvailable);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [appLockEnabled, setAppLockEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('blink_app_lock_enabled') === 'true';
+  });
+
+  const handleToggleAppLock = () => {
+    sound.vibrate(10);
+    const next = !appLockEnabled;
+    setAppLockEnabled(next);
+    localStorage.setItem('blink_app_lock_enabled', String(next));
+  };
 
   const myPin = handleToPin(currentUser.handle);
   const formattedPin = myPin.length === 6 ? `${myPin.slice(0, 3)} - ${myPin.slice(3)}` : myPin;
@@ -306,6 +317,32 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <div
                 className={`w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${
                   soundEnabled ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Row 5: Stealth App Lock */}
+          <div className="px-4 py-3.5 flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-[#00F5A0]">
+                <Lock className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-sm font-semibold text-white block">Stealth App Lock</span>
+                <span className="text-[11px] text-zinc-400 font-mono block">Lock PIN on minimize / app switch</span>
+              </div>
+            </div>
+
+            <button
+              onClick={handleToggleAppLock}
+              className={`w-11 h-6 rounded-full transition-colors duration-200 p-0.5 flex items-center shrink-0 cursor-pointer ${
+                appLockEnabled ? 'bg-[#00F5A0]' : 'bg-zinc-800'
+              }`}
+            >
+              <div
+                className={`w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${
+                  appLockEnabled ? 'translate-x-5' : 'translate-x-0'
                 }`}
               />
             </button>

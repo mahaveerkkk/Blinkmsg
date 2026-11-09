@@ -139,3 +139,42 @@ body {
 .safe-bottom {
   padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
 }
+
+/* Cinematic Message Disintegration & Smoke Keyframes */
+@keyframes smokeDissolve {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0px);
+  }
+  35% {
+    opacity: 0.85;
+    transform: scale(0.98) translateY(-3px);
+    filter: blur(1.5px) brightness(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.88) translateY(-12px);
+    filter: blur(8px) brightness(2);
+  }
+}
+
+.animate-disintegrate {
+  animation: smokeDissolve 0.45s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes fingerprintPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(212, 255, 0, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 22px 6px rgba(212, 255, 0, 0.25);
+    transform: scale(1.05);
+  }
+}
+
+.animate-fingerprint {
+  animation: fingerprintPulse 1.8s ease-in-out infinite;
+}
