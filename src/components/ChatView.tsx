@@ -561,12 +561,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#07080B] text-white select-none relative overflow-hidden font-sans">
+    <div className="flex flex-col h-[100dvh] bg-[#000000] text-white select-none relative overflow-hidden font-sans">
       {/* Ambient background glow for visual depth */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#D4FF00]/[0.025] blur-[120px] pointer-events-none" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#00F5A0]/[0.025] blur-[120px] pointer-events-none" />
 
       {/* Top Header (Luxury Signal / iOS Glass Style) */}
-      <header className="px-3.5 py-2.5 bg-[#07080B]/90 backdrop-blur-2xl border-b border-white/[0.08] flex items-center justify-between shrink-0 z-30 shadow-md">
+      <header className="px-3.5 py-2.5 bg-[#000000]/90 backdrop-blur-2xl border-b border-white/[0.08] flex items-center justify-between shrink-0 z-30 shadow-md safe-top">
         <div className="flex items-center space-x-2.5 min-w-0">
           <button
             onClick={onLeaveRoom}

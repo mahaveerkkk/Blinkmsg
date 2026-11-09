@@ -52,16 +52,23 @@ export const ChatsListView: React.FC<ChatsListViewProps> = ({
   onOpenScanner,
 }) => {
   return (
-    <div className="pb-28 max-w-md mx-auto select-none bg-[#07080B] min-h-screen text-white relative font-sans">
+    <div className="pb-28 max-w-md mx-auto select-none bg-[#000000] min-h-screen text-white relative font-sans">
       {/* 1. Clean, Professional Top Bar (Telegram / Signal Standard) */}
-      <header className="sticky top-0 z-40 bg-[#07080B]/95 backdrop-blur-xl px-4 py-3 flex items-center justify-between border-b border-white/[0.06]">
-        <div>
-          <h1 className="font-extrabold text-2xl tracking-tight text-white">
-            Messages
-          </h1>
-          <p className="text-[11px] text-zinc-400 font-mono">
-            @{currentUser.handle} {!currentUser.isAvailable && '• 👻 Ghost Mode'}
-          </p>
+      <header className="sticky top-0 z-40 bg-[#000000]/90 backdrop-blur-2xl px-4 py-3 flex items-center justify-between border-b border-white/[0.06] safe-top">
+        <div className="flex items-center space-x-2.5">
+          <img
+            src="/logo.png"
+            alt="BlinkMsg"
+            className="w-8 h-8 rounded-xl object-contain drop-shadow-[0_2px_10px_rgba(0,245,160,0.3)]"
+          />
+          <div>
+            <h1 className="font-extrabold text-xl tracking-tight text-white leading-tight">
+              Messages
+            </h1>
+            <p className="text-[11px] text-zinc-400 font-mono">
+              @{currentUser.handle} {!currentUser.isAvailable && '• 👻 Ghost'}
+            </p>
+          </div>
         </div>
 
         {/* Clean Header Action Icons */}

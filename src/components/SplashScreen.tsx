@@ -1,21 +1,16 @@
 import React, { useState } from 'react';
-import { VanishLogo } from './VanishLogo';
 import { UserProfile } from '../types';
-import { supabase, handleToPin } from '../services/network';
+import { supabase } from '../services/network';
 import { StorageService } from '../services/storage';
 import { sound } from '../services/sound';
 import {
   ArrowRight,
   Shield,
-  Lock,
-  Flame,
-  Check,
-  Eye,
-  EyeOff,
   ChevronLeft,
   Camera,
+  Eye,
+  EyeOff,
   Sparkles,
-  KeyRound,
 } from 'lucide-react';
 import { Avatar } from './Avatar';
 
@@ -30,16 +25,23 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   const [avatarId, setAvatarId] = useState(1);
   const [pin, setPin] = useState('');
   const [showPin, setShowPin] = useState(false);
-  const [showAvatarPicker, setShowAvatarPicker] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Auto-fill username when name is typed if handle is empty
+  const handleNameChange = (val: string) => {
+    setDisplayName(val);
+    if (!handle || handle === displayName.toLowerCase().replace(/[^a-z0-9_]/g, '')) {
+      setHandle(val.toLowerCase().replace(/[^a-z0-9_]/g, ''));
+    }
+  };
 
   const handleCreateAccount = async () => {
     setError('');
     const cleanHandle = handle.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
 
     if (!cleanHandle || cleanHandle.length < 3) {
-      setError('Please choose a handle with at least 3 characters.');
+      setError('Please choose a handle with at least 3 letters.');
       sound.playPanic();
       return;
     }
@@ -67,7 +69,6 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
       pin: pin.trim() || undefined,
     };
 
-    // Save to Supabase profiles
     if (supabase) {
       try {
         const { error: dbError } = await supabase.from('profiles').upsert({
@@ -81,7 +82,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
         });
 
         if (dbError && dbError.code === '23505') {
-          setError('This @' + cleanHandle + ' is already taken. Try another.');
+          setError(`@${cleanHandle} is already taken. Try another.`);
           sound.playPanic();
           setLoading(false);
           return;
@@ -119,7 +120,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
           .single();
 
         if (dbError || !data) {
-          setError('No account found for @' + cleanHandle);
+          setError(`No account found for @${cleanHandle}`);
           sound.playPanic();
           setLoading(false);
           return;
@@ -154,280 +155,264 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#07080B] text-white flex flex-col justify-between p-6 select-none font-sans overflow-y-auto">
-      {/* Background ambient lighting */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#D4FF00]/[0.03] rounded-full blur-[140px] pointer-events-none" />
+    <div className="fixed inset-0 z-50 bg-[#000000] text-white flex flex-col justify-between select-none font-sans overflow-hidden safe-top safe-bottom">
+      {/* Ambient Top Glow */}
+      <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-80 h-80 bg-[#00F5A0]/15 rounded-full blur-[120px] pointer-events-none" />
 
-      {/* STATE 1: Clean Telegram/Signal Style Welcome View */}
+      {/* VIEW 1: Clean, Minimal Luxury Native Splash Screen */}
       {view === 'welcome' && (
-        <div className="my-auto max-w-sm mx-auto w-full flex flex-col items-center text-center animate-fade-in z-10 py-6">
-          <div className="mb-6 animate-float">
-            <VanishLogo size={88} animated={true} />
-          </div>
+        <div className="flex-1 flex flex-col justify-between items-center px-6 py-8 w-full max-w-sm mx-auto animate-fade-in relative z-10">
+          {/* Spacer */}
+          <div className="h-6" />
 
-          <h1 className="text-3xl font-black text-white tracking-tight mb-2">
-            BlinkMsg
-          </h1>
-          <p className="text-xs text-zinc-400 max-w-xs mb-8 leading-relaxed font-mono">
-            Zero-Trace Ephemeral Messenger. Messages burn after reading.
-          </p>
-
-          {/* 3 Value Proposition Bullets */}
-          <div className="w-full bg-[#0F121C] border border-white/[0.08] rounded-3xl p-5 space-y-4 mb-8 text-left shadow-lg">
-            <div className="flex items-start space-x-3.5">
-              <div className="w-8 h-8 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/20 flex items-center justify-center text-[#00F5A0] shrink-0 mt-0.5">
-                <Lock className="w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-white">End-to-End Encrypted</h4>
-                <p className="text-[11px] text-zinc-400 mt-0.5">Direct confidential messaging with zero metadata stored.</p>
-              </div>
+          {/* Center Brand Identity */}
+          <div className="flex flex-col items-center text-center">
+            {/* Glowing Logo */}
+            <div className="relative mb-6 group">
+              <div className="absolute inset-0 rounded-[32px] bg-gradient-to-tr from-[#00F5A0]/30 to-[#D4FF00]/25 blur-2xl pointer-events-none animate-pulse-glow" />
+              <img
+                src="/logo.png"
+                alt="BlinkMsg"
+                className="relative z-10 w-28 h-28 object-contain rounded-[28px] drop-shadow-[0_12px_32px_rgba(0,245,160,0.35)]"
+              />
             </div>
 
-            <div className="flex items-start space-x-3.5">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
-                <Flame className="w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-white">Auto-Burn on Read</h4>
-                <p className="text-[11px] text-zinc-400 mt-0.5">Self-destruct timer starts only after the recipient opens & reads.</p>
-              </div>
-            </div>
+            {/* Brand Title */}
+            <h1 className="text-3xl font-black tracking-tight text-white flex items-center justify-center space-x-1">
+              <span>Blink</span>
+              <span className="text-[#00F5A0]">Msg</span>
+            </h1>
 
-            <div className="flex items-start space-x-3.5">
-              <div className="w-8 h-8 rounded-xl bg-[#D4FF00]/10 border border-[#D4FF00]/20 flex items-center justify-center text-[#D4FF00] shrink-0 mt-0.5">
-                <KeyRound className="w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold text-white">No Phone Number Needed</h4>
-                <p className="text-[11px] text-zinc-400 mt-0.5">Connect instantly using your permanent 6-digit personal PIN.</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Primary Action Button */}
-          <button
-            onClick={() => {
-              sound.vibrate(8);
-              setView('create');
-              setError('');
-            }}
-            className="w-full py-4 rounded-2xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black font-black text-sm flex items-center justify-center space-x-2 active:scale-95 transition-all shadow-[0_0_25px_rgba(212,255,0,0.3)] mb-3"
-          >
-            <span>Create Profile</span>
-            <ArrowRight className="w-4 h-4 stroke-[3]" />
-          </button>
-
-          {/* Secondary Action */}
-          <button
-            onClick={() => {
-              sound.vibrate(6);
-              setView('login');
-              setError('');
-            }}
-            className="text-xs text-zinc-400 hover:text-white font-mono py-2 transition-colors"
-          >
-            Already have an account? <span className="text-[#D4FF00] font-bold underline">Log In</span>
-          </button>
-        </div>
-      )}
-
-      {/* STATE 2: Clean Profile Creation Flow */}
-      {view === 'create' && (
-        <div className="my-auto max-w-sm mx-auto w-full animate-fade-in z-10 py-4">
-          {/* Back button */}
-          <button
-            onClick={() => {
-              sound.vibrate(6);
-              setView('welcome');
-              setError('');
-            }}
-            className="inline-flex items-center space-x-1 text-xs text-zinc-400 hover:text-white mb-4 -ml-1 py-1"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>Back</span>
-          </button>
-
-          <div className="text-center mb-6">
-            <h2 className="text-2xl font-black text-white tracking-tight">
-              Create Your Profile
-            </h2>
-            <p className="text-xs text-zinc-400 mt-1 font-mono">
-              Pick an avatar and choose your personal handle
+            {/* Simple, Memorable Tagline */}
+            <p className="text-sm font-medium text-zinc-300 mt-2 tracking-wide">
+              Speak Freely. Vanish Instantly.
             </p>
+            <p className="text-[11px] text-zinc-500 font-mono mt-1">
+              Private • Ephemeral • Untraceable
+            </p>
+
+            {/* E2EE Trust Pill */}
+            <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.08] text-[11px] text-zinc-400 font-mono mt-6">
+              <Shield className="w-3.5 h-3.5 text-[#00F5A0]" />
+              <span>Zero-Trace Messaging</span>
+            </div>
           </div>
 
-          <div className="bg-[#0F121C] border border-white/[0.08] rounded-3xl p-5 shadow-xl space-y-4">
-            {/* Avatar Picker Icon */}
-            <div className="flex flex-col items-center">
-              <div
-                onClick={() => setShowAvatarPicker(!showAvatarPicker)}
-                className="relative cursor-pointer group"
-              >
-                <div className="ring-2 ring-white/[0.1] hover:ring-[#D4FF00]/60 rounded-full p-1 transition-all">
-                  <Avatar avatarId={avatarId} size="lg" />
-                </div>
-                <span className="absolute bottom-0 right-0 w-6 h-6 rounded-full bg-[#181C26] border border-white/[0.15] text-[#D4FF00] flex items-center justify-center text-xs shadow-md">
-                  <Camera className="w-3 h-3" />
-                </span>
-              </div>
-              <span className="text-[11px] text-zinc-400 mt-2 font-mono">Tap to change avatar</span>
-
-              {/* Collapsible Avatar Strip */}
-              {showAvatarPicker && (
-                <div className="flex items-center justify-center space-x-2 mt-3 p-2 bg-[#07080B] rounded-2xl border border-white/[0.06] w-full">
-                  {[1, 2, 3, 4, 5, 6].map((id) => (
-                    <button
-                      key={id}
-                      onClick={() => {
-                        sound.vibrate(6);
-                        setAvatarId(id);
-                        setShowAvatarPicker(false);
-                      }}
-                      className={`p-1 rounded-full transition-transform active:scale-90 ${
-                        avatarId === id ? 'ring-2 ring-[#D4FF00] scale-110' : 'opacity-40 hover:opacity-100'
-                      }`}
-                    >
-                      <Avatar avatarId={id} size="sm" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Display Name */}
-            <div>
-              <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-bold">
-                Your Name / Alias *
-              </label>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="e.g. Mahaveer"
-                autoFocus
-                className="w-full bg-[#07080B] border border-white/[0.08] focus:border-[#D4FF00] rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-zinc-600 outline-none transition-colors"
-              />
-            </div>
-
-            {/* Unique Username / Handle */}
-            <div>
-              <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-bold">
-                Unique @Username *
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-2.5 text-[#D4FF00] font-mono text-sm font-bold">@</span>
-                <input
-                  type="text"
-                  value={handle}
-                  onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                  placeholder="username"
-                  className="w-full bg-[#07080B] border border-white/[0.08] focus:border-[#D4FF00] rounded-xl pl-8 pr-3.5 py-2.5 text-sm font-mono text-white placeholder-zinc-600 outline-none transition-colors"
-                />
-              </div>
-            </div>
-
-            {/* 4-Digit Recovery PIN */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider font-bold">
-                  4-Digit Recovery PIN (Optional)
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowPin(!showPin)}
-                  className="text-zinc-500 hover:text-white"
-                >
-                  {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <input
-                type={showPin ? 'text' : 'password'}
-                maxLength={4}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="••••"
-                className="w-full bg-[#07080B] border border-white/[0.08] focus:border-[#D4FF00] rounded-xl px-3.5 py-2.5 text-center font-mono text-base tracking-[0.3em] text-white placeholder-zinc-700 outline-none transition-colors"
-              />
-            </div>
-
-            {error && (
-              <p className="text-xs text-red-400 font-mono text-center pt-1">
-                {error}
-              </p>
-            )}
+          {/* Bottom Native Mobile Controls */}
+          <div className="w-full space-y-3 pb-2">
+            <button
+              onClick={() => {
+                sound.vibrate(10);
+                setView('create');
+                setError('');
+              }}
+              className="w-full h-14 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-extrabold text-base flex items-center justify-center space-x-2 active:scale-[0.98] transition-all shadow-[0_0_30px_rgba(0,245,160,0.35)] cursor-pointer"
+            >
+              <span>Get Started</span>
+              <ArrowRight className="w-5 h-5 stroke-[2.5]" />
+            </button>
 
             <button
-              onClick={handleCreateAccount}
-              disabled={loading || !handle.trim() || !displayName.trim()}
-              className="w-full py-3.5 rounded-xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black font-black text-xs flex items-center justify-center space-x-2 active:scale-95 transition-all disabled:opacity-30 shadow-md pt-3"
+              onClick={() => {
+                sound.vibrate(6);
+                setView('login');
+                setError('');
+              }}
+              className="w-full py-3 text-center text-xs text-zinc-400 hover:text-white font-mono active:scale-95 transition-all cursor-pointer"
             >
-              <span>{loading ? 'Creating Profile...' : 'Enter BlinkMsg'}</span>
-              <ArrowRight className="w-4 h-4 stroke-[3]" />
+              Already have an account? <span className="text-[#00F5A0] font-bold">Log In</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* STATE 3: Clean Login / Restore Flow */}
-      {view === 'login' && (
-        <div className="my-auto max-w-sm mx-auto w-full animate-fade-in z-10 py-4">
-          {/* Back button */}
-          <button
-            onClick={() => {
-              sound.vibrate(6);
-              setView('welcome');
-              setError('');
-            }}
-            className="inline-flex items-center space-x-1 text-xs text-zinc-400 hover:text-white mb-4 -ml-1 py-1"
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>Back</span>
-          </button>
+      {/* VIEW 2: Native Create Identity Sheet */}
+      {view === 'create' && (
+        <div className="flex-1 flex flex-col justify-end px-5 pb-6 w-full max-w-sm mx-auto relative z-10 animate-slide-up">
+          {/* Card Chassis */}
+          <div className="bg-[#0A0D14] border border-white/[0.08] rounded-[32px] p-6 shadow-2xl space-y-5">
+            {/* Top Sheet Drag Pill */}
+            <div className="w-10 h-1 bg-white/20 rounded-full mx-auto -mt-2 mb-2" />
 
-          <div className="text-center mb-6">
-            <h2 className="text-2xl font-black text-white tracking-tight">
-              Restore Identity
-            </h2>
-            <p className="text-xs text-zinc-400 mt-1 font-mono">
-              Enter your existing @username to log back in
-            </p>
-          </div>
+            {/* Header with Back Button */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => {
+                  sound.vibrate(6);
+                  setView('welcome');
+                  setError('');
+                }}
+                className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-300"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
 
-          <div className="bg-[#0F121C] border border-white/[0.08] rounded-3xl p-5 shadow-xl space-y-4">
-            <div>
-              <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1.5 font-bold">
-                Your @Username *
-              </label>
-              <div className="relative">
-                <span className="absolute left-3.5 top-3 text-[#D4FF00] font-mono text-sm font-bold">@</span>
+              <h2 className="text-base font-extrabold text-white">Create Identity</h2>
+              <div className="w-8" />
+            </div>
+
+            {/* Horizontal Native Avatar Bar */}
+            <div className="space-y-1.5 text-center">
+              <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block">
+                Choose Avatar
+              </span>
+              <div className="flex items-center justify-center space-x-2.5 py-1">
+                {[1, 2, 3, 4, 5, 6].map((id) => (
+                  <button
+                    key={id}
+                    onClick={() => {
+                      sound.vibrate(6);
+                      setAvatarId(id);
+                    }}
+                    className={`relative rounded-full p-0.5 transition-all duration-200 active:scale-90 ${
+                      avatarId === id
+                        ? 'ring-2 ring-[#00F5A0] scale-110 shadow-[0_0_12px_rgba(0,245,160,0.5)]'
+                        : 'opacity-40 hover:opacity-100'
+                    }`}
+                  >
+                    <Avatar avatarId={id} size="sm" />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Inputs */}
+            <div className="space-y-3.5">
+              {/* Display Name */}
+              <div>
+                <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-semibold">
+                  Your Name / Alias
+                </label>
                 <input
                   type="text"
-                  value={handle}
-                  onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[@\s]/g, ''))}
-                  placeholder="username"
+                  value={displayName}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  placeholder="e.g. Mahaveer"
                   autoFocus
-                  className="w-full bg-[#07080B] border border-white/[0.08] focus:border-[#D4FF00] rounded-xl pl-8 pr-3.5 py-3 text-sm font-mono text-white placeholder-zinc-600 outline-none transition-colors"
+                  className="w-full bg-[#121622] border border-white/[0.08] focus:border-[#00F5A0] rounded-xl px-4 py-3 text-base text-white placeholder-zinc-600 outline-none transition-colors"
+                />
+              </div>
+
+              {/* Username */}
+              <div>
+                <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-semibold">
+                  Unique Handle
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-3.5 text-[#00F5A0] font-mono text-sm font-bold">@</span>
+                  <input
+                    type="text"
+                    value={handle}
+                    onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                    placeholder="username"
+                    className="w-full bg-[#121622] border border-white/[0.08] focus:border-[#00F5A0] rounded-xl pl-8 pr-4 py-3 text-base font-mono text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* 4-digit PIN */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider font-semibold">
+                    4-Digit Recovery PIN (Optional)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowPin(!showPin)}
+                    className="text-zinc-500 hover:text-white"
+                  >
+                    {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+                <input
+                  type={showPin ? 'text' : 'password'}
+                  maxLength={4}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="••••"
+                  className="w-full bg-[#121622] border border-white/[0.08] focus:border-[#00F5A0] rounded-xl px-4 py-2.5 text-center font-mono text-lg tracking-[0.4em] text-white placeholder-zinc-700 outline-none transition-colors"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1.5 font-bold">
-                4-Digit Recovery PIN (If Set)
-              </label>
-              <input
-                type="password"
-                maxLength={4}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="••••"
-                className="w-full bg-[#07080B] border border-white/[0.08] focus:border-[#D4FF00] rounded-xl px-3.5 py-3 text-center font-mono text-base tracking-[0.3em] text-white placeholder-zinc-700 outline-none transition-colors"
-              />
+            {error && (
+              <p className="text-xs text-red-400 font-mono text-center">
+                {error}
+              </p>
+            )}
+
+            {/* Submit Button */}
+            <button
+              onClick={handleCreateAccount}
+              disabled={loading || !handle.trim() || !displayName.trim()}
+              className="w-full h-13 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-extrabold text-sm flex items-center justify-center space-x-2 active:scale-[0.98] transition-all disabled:opacity-30 shadow-md cursor-pointer"
+            >
+              <span>{loading ? 'Creating...' : 'Enter BlinkMsg'}</span>
+              <ArrowRight className="w-4 h-4 stroke-[2.5]" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW 3: Native Restore Identity Sheet */}
+      {view === 'login' && (
+        <div className="flex-1 flex flex-col justify-end px-5 pb-6 w-full max-w-sm mx-auto relative z-10 animate-slide-up">
+          <div className="bg-[#0A0D14] border border-white/[0.08] rounded-[32px] p-6 shadow-2xl space-y-5">
+            {/* Top Sheet Drag Pill */}
+            <div className="w-10 h-1 bg-white/20 rounded-full mx-auto -mt-2 mb-2" />
+
+            {/* Header with Back Button */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => {
+                  sound.vibrate(6);
+                  setView('welcome');
+                  setError('');
+                }}
+                className="w-8 h-8 rounded-full bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center text-zinc-300"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
+              <h2 className="text-base font-extrabold text-white">Restore Identity</h2>
+              <div className="w-8" />
+            </div>
+
+            <div className="space-y-3.5">
+              <div>
+                <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-semibold">
+                  Your @Username
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-3.5 text-[#00F5A0] font-mono text-sm font-bold">@</span>
+                  <input
+                    type="text"
+                    value={handle}
+                    onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[@\s]/g, ''))}
+                    placeholder="username"
+                    autoFocus
+                    className="w-full bg-[#121622] border border-white/[0.08] focus:border-[#00F5A0] rounded-xl pl-8 pr-4 py-3 text-base font-mono text-white placeholder-zinc-600 outline-none transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono text-zinc-400 uppercase tracking-wider mb-1 font-semibold">
+                  4-Digit Recovery PIN (If Set)
+                </label>
+                <input
+                  type="password"
+                  maxLength={4}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                  placeholder="••••"
+                  className="w-full bg-[#121622] border border-white/[0.08] focus:border-[#00F5A0] rounded-xl px-4 py-2.5 text-center font-mono text-lg tracking-[0.4em] text-white placeholder-zinc-700 outline-none transition-colors"
+                />
+              </div>
             </div>
 
             {error && (
-              <p className="text-xs text-red-400 font-mono text-center pt-1">
+              <p className="text-xs text-red-400 font-mono text-center">
                 {error}
               </p>
             )}
@@ -435,21 +420,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onComplete }) => {
             <button
               onClick={handleRestoreAccount}
               disabled={loading || !handle.trim()}
-              className="w-full py-3.5 rounded-xl bg-[#D4FF00] hover:bg-[#c4ed00] text-black font-black text-xs flex items-center justify-center space-x-2 active:scale-95 transition-all disabled:opacity-30 shadow-md mt-2"
+              className="w-full h-13 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-extrabold text-sm flex items-center justify-center space-x-2 active:scale-[0.98] transition-all disabled:opacity-30 shadow-md cursor-pointer"
             >
-              <span>{loading ? 'Restoring Profile...' : 'Log In Now'}</span>
-              <ArrowRight className="w-4 h-4 stroke-[3]" />
+              <span>{loading ? 'Restoring...' : 'Log In Now'}</span>
+              <ArrowRight className="w-4 h-4 stroke-[2.5]" />
             </button>
           </div>
         </div>
       )}
-
-      {/* Footer Branding */}
-      <div className="text-center pt-4 pb-2 z-10">
-        <p className="text-[10px] font-mono text-zinc-600">
-          BlinkMsg • Zero-Knowledge Architecture
-        </p>
-      </div>
     </div>
   );
 };
