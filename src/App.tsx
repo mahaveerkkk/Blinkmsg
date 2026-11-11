@@ -571,13 +571,17 @@ export const App: React.FC = () => {
     audio.play('tap');
     setIsGeneratingId(true);
     let ticks = 0;
+    const GHOST_NAMES = ['phantom', 'falcon', 'specter', 'shadow', 'cipher', 'pulsar', 'vortex'];
     const iv = setInterval(() => {
       ticks++;
-      const r1 = Math.floor(100 + Math.random() * 899);
-      const r2 = Math.floor(100 + Math.random() * 899);
-      setMyCode(`${r1}-${r2}`);
+      const randomName = GHOST_NAMES[Math.floor(Math.random() * GHOST_NAMES.length)];
+      const randomNum = Math.floor(100 + Math.random() * 899);
+      const newHandle = `@${randomName}_${randomNum}`;
+      setMyHandle(newHandle);
+      const pin = handleToPin(`${randomName}_${randomNum}`);
+      setMyCode(`${pin.slice(0, 3)}-${pin.slice(3, 6)}`);
       audio.play('tap');
-      if (ticks >= 10) {
+      if (ticks >= 8) {
         clearInterval(iv);
         setIsGeneratingId(false);
         audio.play('receive');
@@ -620,13 +624,13 @@ export const App: React.FC = () => {
       avatar: req.avatar,
       color: 'from-emerald-500 to-teal-500',
       online: true,
-      unread: 1,
+      unread: 0,
       time: 'Just now',
     };
-    setContacts((prev) => [newContact, ...prev]);
+    setContacts((prev) => [newContact, ...prev.filter((c) => c.id !== req.id)]);
     setChats((prev) => ({
       ...prev,
-      [req.id]: [
+      [req.id]: prev[req.id] || [
         {
           id: 'req_msg_' + Date.now(),
           sender: 'them',
@@ -635,14 +639,16 @@ export const App: React.FC = () => {
           timerMode: '30s',
           totalSeconds: 30,
           remainingSeconds: 30,
-          seen: false,
+          seen: true,
           shielded: false,
-          reactions: [],
+          reactions: ['⚡'],
           time: 'Just now',
           disintegrating: false,
         },
       ],
     }));
+    setActiveContactId(req.id);
+    setScreen('chat');
   };
 
   const handleIgnoreRequest = (reqId: string) => {
@@ -692,7 +698,35 @@ export const App: React.FC = () => {
     setReplyingTo(null);
     setShowTimerMenu(false);
     setShowSendEffectMenu(false);
+    setShieldMode(false);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+    // Broadcast to Supabase Realtime
+    if (activeContact && !decoyModeActive) {
+      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+      NetworkService.broadcastMessage(
+        normRoomId,
+        {
+          id: newId,
+          roomId: normRoomId,
+          senderId: 'usr_' + cleanMe,
+          senderHandle: cleanMe,
+          senderDisplayName: myHandle,
+          ciphertext: newMsg.text,
+          iv: 'direct',
+          createdAt: Date.now(),
+          timerSeconds: total,
+          expiresAt: 0,
+          isBurnOnRead: chosenTimer === 'burn',
+          isHoldToReveal: chosenShield,
+          status: 'sent',
+        },
+        activeContact.code,
+        cleanThem
+      ).catch(() => {});
+    }
 
     // If Auto-Seen simulation is ON, partner reads the message after 2.2 seconds
     if (autoSeenSim && !chosenShield) {
@@ -909,25 +943,90 @@ export const App: React.FC = () => {
   };
 
   // Connect New Friend by 6-Digit Code or @handle
-  const handleConnectFriend = (e: React.FormEvent) => {
+  const handleConnectFriend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!connectCodeInput.trim()) return;
     const raw = connectCodeInput.trim();
-    const isHandle = raw.startsWith('@');
-    const cleanCode = isHandle
-      ? `${Math.floor(100 + Math.random() * 899)}-${Math.floor(100 + Math.random() * 899)}`
-      : raw.includes('-')
-      ? raw
-      : `${raw.slice(0, 3)}-${raw.slice(3, 6) || '882'}`;
+    const cleanDigits = raw.replace(/\D/g, '');
+    const cleanHandle = raw.toLowerCase().replace(/^@/, '').trim();
+
+    // 1. Check if it matches any pending request!
+    const matchedReq = pendingRequests.find(
+      (r) =>
+        r.code.replace(/\D/g, '') === cleanDigits ||
+        r.handle.toLowerCase().replace(/^@/, '') === cleanHandle ||
+        r.name.toLowerCase().includes(raw.toLowerCase())
+    );
+    if (matchedReq) {
+      handleAcceptRequest(matchedReq);
+      setConnectCodeInput('');
+      setShowConnectSheet(false);
+      return;
+    }
+
+    // 2. Check if already connected in contacts!
+    const existing = contacts.find(
+      (c) =>
+        c.code.replace(/\D/g, '') === cleanDigits ||
+        c.handle.toLowerCase().replace(/^@/, '') === cleanHandle
+    );
+    if (existing) {
+      setActiveContactId(existing.id);
+      setScreen('chat');
+      setConnectCodeInput('');
+      setShowConnectSheet(false);
+      audio.play('tap');
+      return;
+    }
+
+    // 3. Search Supabase for real user profile
+    let partnerName = '';
+    let partnerHandle = '';
+    let partnerCode = '';
+    let partnerAvatar =
+      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+
+    try {
+      const found = await NetworkService.findProfileByPin(raw);
+      if (found) {
+        partnerName = found.displayName || found.handle;
+        partnerHandle = `@${found.handle}`;
+        const pin = handleToPin(found.handle);
+        partnerCode = `${pin.slice(0, 3)}-${pin.slice(3, 6)}`;
+      }
+    } catch {
+      // offline fallback
+    }
+
+    // Fallback if offline / demo code
+    if (!partnerHandle) {
+      const isHandle = raw.startsWith('@');
+      if (isHandle) {
+        partnerHandle = raw;
+        partnerName = `${raw.slice(1)} ✨`;
+        const pin = handleToPin(raw.slice(1));
+        partnerCode = `${pin.slice(0, 3)}-${pin.slice(3, 6)}`;
+      } else {
+        const pCode =
+          cleanDigits.length === 6
+            ? `${cleanDigits.slice(0, 3)}-${cleanDigits.slice(3, 6)}`
+            : raw.includes('-')
+            ? raw
+            : `${raw.slice(0, 3)}-${raw.slice(3, 6) || '882'}`;
+        partnerCode = pCode;
+        partnerHandle = `@user_${cleanDigits.slice(0, 4) || '702'}`;
+        partnerName = `Partner #${cleanDigits.slice(0, 3) || '702'}`;
+      }
+    }
 
     const newId = 'c_' + Date.now();
     const newContact: ContactItem = {
       id: newId,
-      name: isHandle ? raw.slice(1) + ' ✨' : `Partner #${cleanCode.slice(0, 3)}`,
-      handle: isHandle ? raw : `@user_${cleanCode.slice(0, 3)}`,
-      code: cleanCode,
-      avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
-      color: 'from-violet-500 to-fuchsia-500',
+      name: partnerName,
+      handle: partnerHandle,
+      code: partnerCode,
+      avatar: partnerAvatar,
+      color: 'from-emerald-500 to-teal-500',
       online: true,
       unread: 0,
       time: 'Now',
@@ -942,11 +1041,11 @@ export const App: React.FC = () => {
           id: 'w_' + Date.now(),
           sender: 'them',
           type: 'text',
-          text: `Connected via zero-login code ${cleanCode}. No phone or email shared!`,
+          text: `Connected via zero-login code ${partnerCode}. No phone or email shared! 🔒✨`,
           timerMode: '30s',
           totalSeconds: 30,
           remainingSeconds: 30,
-          seen: false,
+          seen: true,
           shielded: false,
           time: 'Just now',
           disintegrating: false,
@@ -1229,7 +1328,15 @@ export const App: React.FC = () => {
                   <input
                     type="text"
                     value={myHandle}
-                    onChange={(e) => setMyHandle(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setMyHandle(val);
+                      const clean = val.replace(/^@/, '').trim();
+                      if (clean) {
+                        const pin = handleToPin(clean);
+                        setMyCode(`${pin.slice(0, 3)}-${pin.slice(3, 6)}`);
+                      }
+                    }}
                     className="w-full bg-transparent text-xs font-semibold text-white focus:outline-none mt-0.5"
                   />
                 </div>
@@ -1262,20 +1369,22 @@ export const App: React.FC = () => {
               <button
                 onClick={() => {
                   audio.play('send');
-                  const cleanHandle = myHandle.replace(/^@/, '');
-                  StorageService.saveProfile({
-                    id: 'usr_' + Date.now(),
+                  const cleanHandle = myHandle.replace(/^@/, '').toLowerCase().trim();
+                  const prof = {
+                    id: 'usr_' + cleanHandle,
                     handle: cleanHandle,
                     displayName: cleanHandle,
                     avatarId: 1,
-                    vibe: '',
+                    vibe: '⚡ Stealth Active',
                     isAvailable: true,
                     country: 'India',
                     state: 'Delhi',
                     city: 'New Delhi',
                     lastActive: Date.now(),
                     pin: recoveryPin,
-                  });
+                  };
+                  StorageService.saveProfile(prof);
+                  NetworkService.syncProfileToSupabase(prof).catch(() => {});
                   setScreen('list');
                 }}
                 className="w-full py-3.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-black text-xs shadow-[0_10px_30px_rgba(0,245,160,0.35)] transition-all cursor-pointer"
@@ -1795,21 +1904,27 @@ export const App: React.FC = () => {
                         onDoubleClick={() =>
                           setActiveReactionMsgId(activeReactionMsgId === msg.id ? null : msg.id)
                         }
-                        className={`relative rounded-[22px] px-3.5 py-2.5 transition-all cursor-pointer ${
+                        onMouseDown={() => msg.shielded && handleHoldStart(msg)}
+                        onMouseUp={() => msg.shielded && handleHoldEnd(msg)}
+                        onTouchStart={() => msg.shielded && handleHoldStart(msg)}
+                        onTouchEnd={() => msg.shielded && handleHoldEnd(msg)}
+                        className={`relative rounded-2xl ${
+                          isMe ? 'rounded-br-xs' : 'rounded-bl-xs'
+                        } px-3.5 py-2 transition-all cursor-pointer ${
                           isMe
                             ? msg.whisperEffect
-                              ? 'bg-gradient-to-r from-fuchsia-600 via-indigo-600 to-cyan-500 text-white rounded-br-md shadow-[0_0_25px_rgba(217,70,239,0.4)]'
-                              : 'bg-gradient-to-br from-[#00F5A0] to-[#00B4D8] text-black font-medium rounded-br-md shadow-[0_8px_24px_rgba(0,245,160,0.25)]'
-                            : 'bg-[#18181D] border border-white/[0.08] text-zinc-100 rounded-bl-md shadow-md'
+                              ? 'bg-gradient-to-r from-fuchsia-700 via-purple-700 to-indigo-700 text-white shadow-lg'
+                              : 'bg-[#005c4b] text-white shadow-md'
+                            : 'bg-[#1e1e24] border border-white/10 text-zinc-100 shadow-md'
                         }`}
                       >
                         {/* Quoted Reply Header */}
                         {msg.replyTo && (
-                          <div className="mb-1.5 pl-2 border-l-2 border-emerald-400 bg-black/25 rounded-r-lg py-1 pr-2 text-[10px]">
-                            <span className="font-bold text-emerald-300 block">
+                          <div className="mb-1.5 pl-2 border-l-2 border-[#00F5A0] bg-black/30 rounded-r-lg py-1 pr-2 text-[10px]">
+                            <span className="font-bold text-[#00F5A0] block">
                               {msg.replyTo.sender}
                             </span>
-                            <span className="opacity-80 line-clamp-1">{msg.replyTo.text}</span>
+                            <span className="opacity-80 line-clamp-1 text-white">{msg.replyTo.text}</span>
                           </div>
                         )}
 
@@ -1822,45 +1937,55 @@ export const App: React.FC = () => {
 
                         {/* 1. TEXT CONTENT */}
                         {msg.type === 'text' && (
-                          <p
-                            className={`text-[13.5px] leading-snug transition-all duration-200 ${
-                              isBlurred ? 'blur-md opacity-25 select-none' : 'blur-0 opacity-100'
-                            }`}
-                          >
-                            {msg.text}
-                          </p>
+                          <div className="relative">
+                            <p
+                              className={`text-[13px] leading-relaxed transition-all duration-200 ${
+                                isBlurred ? 'filter blur-[5px] opacity-30 select-none' : 'filter-none opacity-100'
+                              }`}
+                            >
+                              {msg.text}
+                            </p>
+                            {isBlurred && (
+                              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                <span className="text-[10px] font-semibold text-emerald-200 bg-black/60 px-2 py-0.5 rounded-full flex items-center gap-1 backdrop-blur-sm border border-emerald-500/20">
+                                  <Fingerprint className="w-3 h-3 text-[#00F5A0]" />
+                                  Hold to Reveal
+                                </span>
+                              </div>
+                            )}
+                          </div>
                         )}
 
                         {/* 2. LISTEN-ONCE VOICE NOTE */}
                         {msg.type === 'voice' && (
-                          <div className="flex items-center gap-3 py-1 min-w-[190px]">
+                          <div className="flex items-center gap-2.5 py-0.5 min-w-[170px]">
                             <button
-                              onClick={() => handlePlayVoice(msg)}
-                              className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-all cursor-pointer ${
+                              onClick={(e) => { e.stopPropagation(); handlePlayVoice(msg); }}
+                              className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-all cursor-pointer ${
                                 playingVoiceId === msg.id
                                   ? 'bg-rose-500 text-white animate-pulse'
-                                  : isMe ? 'bg-black text-[#00F5A0]' : 'bg-white text-zinc-950'
+                                  : isMe ? 'bg-white text-zinc-950' : 'bg-[#00F5A0] text-zinc-950'
                               }`}
                             >
-                              <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                              <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
                             <div className="flex-1">
-                              <div className="flex items-center gap-1 h-4">
+                              <div className="flex items-center gap-0.5 h-3.5">
                                 {[45, 90, 60, 100, 50, 80, 95, 40, 75, 60, 85, 50].map((h, i) => (
                                   <span
                                     key={i}
                                     style={{ height: `${h}%` }}
-                                    className={`w-1 rounded-full ${
+                                    className={`w-0.5 rounded-full ${
                                       playingVoiceId === msg.id
-                                        ? 'bg-emerald-300 animate-bounce'
-                                        : isMe ? 'bg-black/50' : 'bg-white/40'
+                                        ? 'bg-emerald-300 animate-pulse'
+                                        : isMe ? 'bg-white/70' : 'bg-white/40'
                                     }`}
                                   />
                                 ))}
                               </div>
-                              <div className="flex justify-between text-[10px] opacity-80 mt-1">
+                              <div className="flex justify-between text-[9px] opacity-80 mt-0.5">
                                 <span>
-                                  {playingVoiceId === msg.id ? 'Playing 1x...' : 'Listen-Once Audio'}
+                                  {playingVoiceId === msg.id ? 'Playing 1x...' : 'Listen-Once'}
                                 </span>
                                 <span>{msg.duration || '0:04'}</span>
                               </div>
@@ -1870,52 +1995,49 @@ export const App: React.FC = () => {
 
                         {/* 3. EPHEMERAL SECRET PHOTO */}
                         {msg.type === 'photo' && (
-                          <div
-                            className={`rounded-2xl overflow-hidden border border-white/15 bg-zinc-950/60 p-2 min-w-[205px] transition-all duration-200 ${
-                              isBlurred ? 'blur-lg opacity-25' : 'blur-0 opacity-100'
-                            }`}
-                          >
-                            {msg.previewUrl ? (
-                              <div className="relative h-32 rounded-xl overflow-hidden">
+                          <div className="rounded-xl overflow-hidden max-w-[210px] bg-black/40">
+                            <div className={`relative transition-all duration-200 ${isBlurred ? 'filter blur-[7px] opacity-40' : ''}`}>
+                              {msg.previewUrl ? (
                                 <img
                                   src={msg.previewUrl}
                                   alt={msg.caption}
-                                  className="w-full h-full object-cover"
+                                  className="w-full h-28 object-cover rounded-xl"
                                 />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex flex-col justify-end p-2">
-                                  <span className="text-xs font-bold text-white">{msg.caption}</span>
-                                  <span className="text-[9px] text-[#00F5A0]">
-                                    Zero Gallery Trace • Vaporizes on Seen
+                              ) : (
+                                <div className="w-48 h-24 bg-gradient-to-tr from-emerald-950 to-black flex flex-col items-center justify-center p-2 text-center rounded-xl">
+                                  <Sparkles className="w-5 h-5 text-[#00F5A0] mb-1" />
+                                  <span className="text-[11px] font-bold text-white">{msg.caption || 'Ephemeral Snapshot'}</span>
+                                </div>
+                              )}
+                              {isBlurred && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+                                  <span className="text-[10px] font-semibold text-white bg-black/75 px-2.5 py-1 rounded-full flex items-center gap-1 border border-white/20">
+                                    <Fingerprint className="w-3 h-3 text-[#00F5A0]" /> Hold to Reveal
                                   </span>
                                 </div>
-                              </div>
-                            ) : (
-                              <div className="h-28 rounded-xl bg-gradient-to-tr from-[#00F5A0]/25 via-fuchsia-500/20 to-emerald-400/20 flex flex-col items-center justify-center p-2 text-center">
-                                <Sparkles className="w-6 h-6 text-[#00F5A0] mb-1" />
-                                <span className="text-xs font-bold text-white">{msg.caption}</span>
-                                <span className="text-[10px] text-zinc-300 mt-0.5">
-                                  Zero Gallery Trace • Vaporizes on Timer
-                                </span>
-                              </div>
+                              )}
+                            </div>
+                            {msg.caption && (
+                              <p className="text-[11px] font-medium text-white/90 px-2 py-1 bg-black/40">{msg.caption}</p>
                             )}
                           </div>
                         )}
 
-                        {/* HOLD-TO-REVEAL FROSTED FINGERPRINT OVERLAY */}
+                        {/* HOLD-TO-REVEAL COMPACT FOOTER PILL */}
                         {msg.shielded && (
                           <button
-                            onMouseDown={() => handleHoldStart(msg)}
-                            onMouseUp={() => handleHoldEnd(msg)}
-                            onMouseLeave={() => isRevealed && handleHoldEnd(msg)}
-                            onTouchStart={() => handleHoldStart(msg)}
-                            onTouchEnd={() => handleHoldEnd(msg)}
-                            className={`mt-2 w-full py-1.5 px-3 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                            onMouseDown={(e) => { e.stopPropagation(); handleHoldStart(msg); }}
+                            onMouseUp={(e) => { e.stopPropagation(); handleHoldEnd(msg); }}
+                            onMouseLeave={(e) => { e.stopPropagation(); isRevealed && handleHoldEnd(msg); }}
+                            onTouchStart={(e) => { e.stopPropagation(); handleHoldStart(msg); }}
+                            onTouchEnd={(e) => { e.stopPropagation(); handleHoldEnd(msg); }}
+                            className={`mt-1.5 w-full py-1 px-2.5 rounded-lg text-[10px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer ${
                               isRevealed
-                                ? 'bg-emerald-400/20 text-emerald-200 border border-emerald-400/40'
-                                : 'bg-black/40 hover:bg-black/60 text-white border border-white/15 backdrop-blur-md'
+                                ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/40'
+                                : 'bg-black/35 hover:bg-black/55 text-white/90 border border-white/10'
                             }`}
                           >
-                            <Fingerprint className="w-3.5 h-3.5 text-[#00F5A0]" />
+                            <Fingerprint className="w-3 h-3 text-[#00F5A0]" />
                             <span>
                               {isRevealed ? 'Release to Lock' : 'Hold Finger to Reveal'}
                             </span>
@@ -1923,12 +2045,12 @@ export const App: React.FC = () => {
                         )}
 
                         {/* BOTTOM META ROW: TIME + SEEN-TRIGGERED CIRCULAR RING */}
-                        <div className="flex items-center justify-end gap-2 mt-1.5 text-[10px] opacity-85">
+                        <div className="flex items-center justify-end gap-1.5 mt-1 text-[9px] opacity-80">
                           <span>{msg.time}</span>
 
                           {!msg.seen ? (
                             <button
-                              onClick={() => markMessageSeen(activeContactId, msg.id)}
+                              onClick={(e) => { e.stopPropagation(); markMessageSeen(activeContactId, msg.id); }}
                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/30 hover:bg-black/50 text-amber-300 font-medium transition-all cursor-pointer"
                               title="Tap to simulate Receiver reading this message"
                             >
@@ -1937,7 +2059,7 @@ export const App: React.FC = () => {
                             </button>
                           ) : (
                             <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/30 text-[#00F5A0] font-mono font-bold">
-                              <svg className="w-3.5 h-3.5 -rotate-90" viewBox="0 0 20 20">
+                              <svg className="w-3 h-3 -rotate-90" viewBox="0 0 20 20">
                                 <circle
                                   cx="10"
                                   cy="10"
@@ -1958,9 +2080,7 @@ export const App: React.FC = () => {
                                   fill="none"
                                 />
                               </svg>
-                              <span>
-                                {msg.timerMode === 'burn' ? '🔥' : `${msg.remainingSeconds}s`}
-                              </span>
+                              <span>{msg.remainingSeconds}s</span>
                             </div>
                           )}
                         </div>
