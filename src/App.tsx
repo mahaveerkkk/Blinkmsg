@@ -307,7 +307,7 @@ export const App: React.FC = () => {
   const [decoyModeActive, setDecoyModeActive] = useState<boolean>(false);
   const [ghostMode, setGhostMode] = useState<boolean>(false);
   const [muted, setMuted] = useState<boolean>(false);
-  const [autoSeenSim, setAutoSeenSim] = useState<boolean>(false);
+  const [autoSeenSim, setAutoSeenSim] = useState<boolean>(true);
   const [screenshotToast, setScreenshotToast] = useState<string | null>(null);
 
   // Onboarding & Account Restore State
@@ -651,6 +651,35 @@ export const App: React.FC = () => {
     };
   }, [myHandle, screen, activeContactId]);
 
+  // Auto-start countdown on unshielded messages when viewing chat
+  useEffect(() => {
+    if (screen === 'chat' && activeContact?.id && activeContact.id !== 'placeholder') {
+      setChats((prev) => {
+        const list = prev[activeContact.id] || [];
+        let changed = false;
+        const updated = list.map((m) => {
+          if (!m.seen && !m.shielded) {
+            changed = true;
+            return { ...m, seen: true };
+          }
+          return m;
+        });
+        return changed ? { ...prev, [activeContact.id]: updated } : prev;
+      });
+
+      // Clear unread counter on contact
+      setContacts((prev) =>
+        prev.map((c) => (c.id === activeContact.id ? { ...c, unread: 0 } : c))
+      );
+
+      // Broadcast read receipt to partner
+      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+      NetworkService.broadcastDeliveryAck(normRoomId, 'all', 'read').catch(() => {});
+    }
+  }, [screen, activeContact?.id]);
+
   // Live Peer Lookup when typing in Connect Sheet
   useEffect(() => {
     if (!showConnectSheet) {
@@ -731,8 +760,8 @@ export const App: React.FC = () => {
           timerMode: payload.isBurnOnRead ? 'burn' : (`${total}s` as any),
           totalSeconds: total,
           remainingSeconds: total,
-          seen: false,
-          shielded: payload.isHoldToReveal ?? true,
+          seen: !payload.isHoldToReveal,
+          shielded: payload.isHoldToReveal ?? false,
           reactions: [],
           time: new Date(payload.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           disintegrating: false,
@@ -802,11 +831,11 @@ export const App: React.FC = () => {
       },
 
       onDeliveryAck: (data: { msgId: string; status: 'delivered' | 'read' }) => {
-        if (data?.status === 'read' && data?.msgId) {
+        if (data?.status === 'read') {
           setChats((prev) => ({
             ...prev,
             [activeContact.id]: (prev[activeContact.id] || []).map((m) =>
-              m.id === data.msgId ? { ...m, seen: true } : m
+              data.msgId === 'all' || m.id === data.msgId ? { ...m, seen: true } : m
             ),
           }));
         }
@@ -2150,6 +2179,40 @@ export const App: React.FC = () => {
 
             {/* Conversation List */}
             <div className="flex-1 overflow-y-auto px-3 space-y-1">
+              {/* Network Discovery when search doesn't match local contacts */}
+              {searchQuery.trim().length >= 3 && !activeContactsList.some(
+                (c) =>
+                  c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  c.code.includes(searchQuery.replace(/\D/g, '')) ||
+                  c.handle.toLowerCase().includes(searchQuery.toLowerCase())
+              ) && (
+                <div className="p-3 my-2 rounded-2xl bg-zinc-900/95 border border-[#00F5A0]/40 shadow-xl flex items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-10 h-10 rounded-full bg-[#00F5A0]/15 border border-[#00F5A0]/40 flex items-center justify-center shrink-0 text-[#00F5A0]">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold text-white truncate">
+                        Connect with #{searchQuery.replace(/\D/g, '') || searchQuery}
+                      </div>
+                      <p className="text-[10px] text-zinc-400 truncate">
+                        Direct zero-login stealth tunnel
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      connectDirectly(searchQuery);
+                      setSearchQuery('');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs shrink-0 cursor-pointer shadow-md shadow-[#00F5A0]/20 flex items-center gap-1"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Connect</span>
+                  </button>
+                </div>
+              )}
+
               {activeContactsList
                 .filter(
                   (c) =>
@@ -2305,8 +2368,27 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Right Header Icons: Clean Timer & Panic Burn */}
-              <div className="flex items-center gap-1.5">
+              {/* Right Header Icons: Screenshot Test, QR/PIN Modal, Disappearing Timer & Panic Burn */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={triggerScreenshotBlockedAlert}
+                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-amber-300 transition-all cursor-pointer"
+                  title="Simulate Screenshot Attempt Blocked"
+                >
+                  <ShieldAlert className="w-4 h-4" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    setPopoverTab('qr');
+                    setShowQrPinPopover(true);
+                  }}
+                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-300 transition-all cursor-pointer"
+                  title="My Code, QR & 4-Digit PIN"
+                >
+                  <QrCode className="w-4 h-4 text-[#00F5A0]" />
+                </button>
+
                 <button
                   onClick={() => setShowTimerMenu(!showTimerMenu)}
                   className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0 transition-all cursor-pointer ${
@@ -2873,9 +2955,16 @@ export const App: React.FC = () => {
                       type="text"
                       value={messageText}
                       onChange={(e) => {
-                        setMessageText(e.target.value);
+                        const val = e.target.value;
+                        setMessageText(val);
                         setTypingPulse(100);
                         audio.play('tap');
+                        if (activeContact && activeContact.id !== 'placeholder') {
+                          const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+                          const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+                          const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+                          NetworkService.broadcastTyping(normRoomId, cleanMe);
+                        }
                       }}
                       placeholder={
                         shieldMode ? 'Shielded secret message...' : 'Stealth message...'
@@ -3046,22 +3135,12 @@ export const App: React.FC = () => {
               {/* TAB 1: MY 6-DIGIT CODE & QR */}
               {popoverTab === 'qr' && (
                 <div className="text-center space-y-3">
-                  <div className="w-36 h-36 mx-auto p-3 rounded-2xl bg-white flex items-center justify-center shadow-inner">
-                    <div className="grid grid-cols-6 gap-1 w-full h-full">
-                      {Array.from({ length: 36 }).map((_, i) => (
-                        <div
-                          key={i}
-                          className={`rounded-[2px] ${
-                            (i + (parseInt(myCode.replace(/\D/g, '')) || 482)) % 2 === 0 ||
-                            i === 0 ||
-                            i === 5 ||
-                            i === 30
-                              ? 'bg-zinc-950'
-                              : 'bg-transparent'
-                          }`}
-                        />
-                      ))}
-                    </div>
+                  <div className="w-40 h-40 mx-auto p-2 rounded-2xl bg-black border-2 border-[#00F5A0]/40 flex items-center justify-center shadow-lg shadow-[#00F5A0]/15 relative overflow-hidden">
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=blinkmsg://connect?code=${myCode.replace(/\D/g, '')}&color=00F5A0&bgcolor=000000`}
+                      alt="Real Scannable QR Code"
+                      className="w-full h-full object-contain rounded-xl"
+                    />
                   </div>
 
                   <div>
@@ -3122,12 +3201,13 @@ export const App: React.FC = () => {
                     </button>
                     <button
                       onClick={() => {
-                        connectDirectly('840291', 'Kabir • Partner');
+                        setShowQrPinPopover(false);
+                        connectDirectly('768049', 'Partner • 768049');
                       }}
                       className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-200 font-semibold text-xs cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <Sparkles className="w-3.5 h-3.5 text-[#00F5A0]" />
-                      <span>Instant Scan Demo (840291)</span>
+                      <span>Simulate Instant QR Scan</span>
                     </button>
                   </div>
                 </div>
