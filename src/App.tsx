@@ -32,6 +32,7 @@ import {
   ShieldAlert,
   Wand2,
   Trash2,
+  Settings,
 } from 'lucide-react';
 import { StorageService } from './services/storage';
 import { NetworkService, supabase, handleToPin } from './services/network';
@@ -188,7 +189,7 @@ const INITIAL_REQUESTS: HandshakeRequest[] = [
     id: 'req1',
     name: 'Zoya • Design',
     handle: '@zoya_ui',
-    code: '771-409',
+    code: '771409',
     avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
     via: 'Scanned your QR Code',
     time: '1m ago',
@@ -197,7 +198,7 @@ const INITIAL_REQUESTS: HandshakeRequest[] = [
     id: 'req2',
     name: 'Dev_Phantom',
     handle: '@phantom_0x',
-    code: '512-883',
+    code: '512883',
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
     via: 'Entered your 6-Digit Code',
     time: '9m ago',
@@ -209,7 +210,7 @@ const DECOY_CONTACTS: ContactItem[] = [
     id: 'd1',
     name: 'Mom ❤️',
     handle: '@home_family',
-    code: '101-202',
+    code: '101202',
     avatar: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=150&auto=format&fit=crop&q=80',
     online: true,
     unread: 0,
@@ -219,7 +220,7 @@ const DECOY_CONTACTS: ContactItem[] = [
     id: 'd2',
     name: 'College Study Notes',
     handle: '@uni_notes',
-    code: '304-551',
+    code: '304551',
     avatar: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=150&auto=format&fit=crop&q=80',
     online: false,
     unread: 0,
@@ -265,7 +266,7 @@ const INITIAL_CONTACTS: ContactItem[] = [
     id: 'c1',
     name: 'Aria ✨',
     handle: '@aria_v',
-    code: '904-112',
+    code: '904112',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
     color: 'from-indigo-500 to-violet-500',
     online: true,
@@ -276,7 +277,7 @@ const INITIAL_CONTACTS: ContactItem[] = [
     id: 'c2',
     name: 'Kabir • Bro',
     handle: '@kabir_x',
-    code: '318-774',
+    code: '318774',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     color: 'from-emerald-500 to-teal-500',
     online: true,
@@ -287,7 +288,7 @@ const INITIAL_CONTACTS: ContactItem[] = [
     id: 'c3',
     name: 'Riya (Private)',
     handle: '@riya_sec',
-    code: '629-401',
+    code: '629401',
     avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
     color: 'from-rose-500 to-orange-500',
     online: false,
@@ -402,11 +403,15 @@ export const App: React.FC = () => {
 
   // User Identity & Privacy Controls
   const [myCode, setMyCode] = useState<string>(() => {
-    return localStorage.getItem('blink_user_code') || '482-910';
+    const saved = localStorage.getItem('blink_user_code');
+    if (saved) return saved.replace(/\D/g, '');
+    const p = StorageService.getProfile();
+    if (p) return handleToPin(p.handle).slice(0, 6);
+    return '768049';
   });
   const [myHandle, setMyHandle] = useState<string>(() => {
     const p = StorageService.getProfile();
-    return p ? `@${p.handle}` : '@arjun_k';
+    return p ? `@${p.handle}` : '@vanish_857';
   });
   const [recoveryPin, setRecoveryPin] = useState<string>(() => {
     return localStorage.getItem('blink_recovery_pin') || '2580';
@@ -420,7 +425,7 @@ export const App: React.FC = () => {
   // Onboarding & Account Restore State
   const [isGeneratingId, setIsGeneratingId] = useState<boolean>(false);
   const [showRestoreSheet, setShowRestoreSheet] = useState<boolean>(false);
-  const [restoreHandleInput, setRestoreHandleInput] = useState<string>('@arjun_k');
+  const [restoreHandleInput, setRestoreHandleInput] = useState<string>('@vanish_857');
   const [restorePinInput, setRestorePinInput] = useState<string>('');
   const [restoreSuccess, setRestoreSuccess] = useState<boolean>(false);
 
@@ -433,6 +438,7 @@ export const App: React.FC = () => {
   const [connectCodeInput, setConnectCodeInput] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showCameraModal, setShowCameraModal] = useState<boolean>(false);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
 
   // Disclaimer Popup on Regenerating Code
   const [showRegenerateDisclaimer, setShowRegenerateDisclaimer] = useState<boolean>(false);
@@ -942,6 +948,93 @@ export const App: React.FC = () => {
     setTimeout(() => setInAppBanner(null), 3000);
   };
 
+  // Connect directly by code or handle and open chat immediately
+  const connectDirectly = (rawTarget: string, customName?: string) => {
+    if (!rawTarget) return;
+    const cleanDigits = rawTarget.replace(/\D/g, '');
+    const cleanHandle = rawTarget.toLowerCase().replace(/^@/, '').trim();
+
+    // 1. Check if matches pending request
+    const matchedReq = pendingRequests.find(
+      (r) =>
+        r.code.replace(/\D/g, '') === cleanDigits ||
+        r.handle.toLowerCase().replace(/^@/, '') === cleanHandle ||
+        r.name.toLowerCase().includes(rawTarget.toLowerCase())
+    );
+    if (matchedReq) {
+      handleAcceptRequest(matchedReq);
+      setShowQrPinPopover(false);
+      setShowConnectSheet(false);
+      return;
+    }
+
+    // 2. Check existing contact
+    const existing = contacts.find(
+      (c) =>
+        c.code.replace(/\D/g, '') === cleanDigits ||
+        c.handle.toLowerCase().replace(/^@/, '') === cleanHandle
+    );
+    if (existing) {
+      setActiveContactId(existing.id);
+      setScreen('chat');
+      setShowQrPinPopover(false);
+      setShowConnectSheet(false);
+      audio.play('tap');
+      return;
+    }
+
+    // 3. Create new connection
+    const isHandle = rawTarget.startsWith('@');
+    const partnerCode =
+      cleanDigits.length === 6
+        ? cleanDigits
+        : isHandle
+        ? handleToPin(rawTarget.slice(1)).slice(0, 6)
+        : '840291';
+    const partnerHandle = isHandle ? rawTarget : `@user_${partnerCode.slice(0, 4)}`;
+    const partnerName =
+      customName || (isHandle ? `${rawTarget.slice(1)} ✨` : `Partner #${partnerCode.slice(0, 3)}`);
+
+    const newId = 'c_' + Date.now();
+    const newContact: ContactItem = {
+      id: newId,
+      name: partnerName,
+      handle: partnerHandle,
+      code: partnerCode,
+      avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
+      color: 'from-emerald-500 to-teal-500',
+      online: true,
+      unread: 0,
+      time: 'Now',
+    };
+
+    audio.play('receive');
+    setContacts((prev) => [newContact, ...prev]);
+    setChats((prev) => ({
+      ...prev,
+      [newId]: [
+        {
+          id: 'w_' + Date.now(),
+          sender: 'them',
+          type: 'text',
+          text: `Encrypted stealth tunnel established via code ${partnerCode}. Zero traces saved. 🔒✨`,
+          timerMode: '30s',
+          totalSeconds: 30,
+          remainingSeconds: 30,
+          seen: true,
+          shielded: false,
+          reactions: ['⚡'],
+          time: 'Just now',
+          disintegrating: false,
+        },
+      ],
+    }));
+    setShowQrPinPopover(false);
+    setShowConnectSheet(false);
+    setActiveContactId(newId);
+    setScreen('chat');
+  };
+
   // Connect New Friend by 6-Digit Code or @handle
   const handleConnectFriend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -991,8 +1084,7 @@ export const App: React.FC = () => {
       if (found) {
         partnerName = found.displayName || found.handle;
         partnerHandle = `@${found.handle}`;
-        const pin = handleToPin(found.handle);
-        partnerCode = `${pin.slice(0, 3)}-${pin.slice(3, 6)}`;
+        partnerCode = handleToPin(found.handle).slice(0, 6);
       }
     } catch {
       // offline fallback
@@ -1004,18 +1096,15 @@ export const App: React.FC = () => {
       if (isHandle) {
         partnerHandle = raw;
         partnerName = `${raw.slice(1)} ✨`;
-        const pin = handleToPin(raw.slice(1));
-        partnerCode = `${pin.slice(0, 3)}-${pin.slice(3, 6)}`;
+        partnerCode = handleToPin(raw.slice(1)).slice(0, 6);
       } else {
         const pCode =
           cleanDigits.length === 6
-            ? `${cleanDigits.slice(0, 3)}-${cleanDigits.slice(3, 6)}`
-            : raw.includes('-')
-            ? raw
-            : `${raw.slice(0, 3)}-${raw.slice(3, 6) || '882'}`;
+            ? cleanDigits
+            : cleanDigits.padEnd(6, '0').slice(0, 6) || '840291';
         partnerCode = pCode;
-        partnerHandle = `@user_${cleanDigits.slice(0, 4) || '702'}`;
-        partnerName = `Partner #${cleanDigits.slice(0, 3) || '702'}`;
+        partnerHandle = `@user_${partnerCode.slice(0, 4)}`;
+        partnerName = `Partner #${partnerCode.slice(0, 3)}`;
       }
     }
 
@@ -1139,99 +1228,8 @@ export const App: React.FC = () => {
         <div className="w-[400px] h-[400px] bg-emerald-500/8 rounded-full blur-[140px] -ml-40" />
       </div>
 
-      {/* ==========================================
-          EXTERNAL FLOATING STUDIO CONTROLS (DESKTOP / PROTOTYPE BAR)
-         ========================================== */}
-      <div className="hidden sm:flex relative z-20 mb-2.5 flex-wrap items-center justify-center gap-1.5 bg-zinc-900/85 border border-white/10 backdrop-blur-xl px-3 py-1.5 rounded-full shadow-2xl max-w-[96vw]">
-        {/* Screen Switcher Segmented Pill */}
-        <div className="flex items-center bg-black/50 p-0.5 rounded-full border border-white/5 mr-1">
-          {[
-            { id: 'onboarding', label: '✨ Onboarding' },
-            { id: 'list', label: `📱 Chats (${pendingRequests.length})` },
-            { id: 'chat', label: '💬 Active Chat' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => {
-                setScreen(tab.id as 'onboarding' | 'list' | 'chat');
-                audio.play('tap');
-              }}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
-                screen === tab.id ? 'bg-[#00F5A0] text-black shadow' : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <button
-          onClick={() => {
-            setRemoteTyping((v) => !v);
-            setScreen('chat');
-            audio.play('tap');
-          }}
-          className={`px-2.5 py-1 rounded-full border text-[11px] font-medium transition-all flex items-center gap-1 ${
-            remoteTyping
-              ? 'bg-fuchsia-500/20 border-fuchsia-500/40 text-fuchsia-300'
-              : 'bg-white/5 hover:bg-white/10 border-white/10 text-zinc-300'
-          }`}
-        >
-          <span>🌊 {remoteTyping ? 'Aria Typing: ON' : 'Aria Typing Wave'}</span>
-        </button>
-
-        <button
-          onClick={triggerScreenshotBlockedAlert}
-          className="px-2.5 py-1 rounded-full bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-[11px] font-medium text-rose-300 transition-all flex items-center gap-1"
-        >
-          <ShieldAlert className="w-3 h-3" />
-          <span>📸 Test Screenshot Block</span>
-        </button>
-
-        <button
-          onClick={triggerIncomingDemo}
-          className="px-2.5 py-1 rounded-full bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-[11px] font-medium text-emerald-300 transition-all flex items-center gap-1"
-        >
-          <Bell className="w-3 h-3" />
-          <span>Incoming (1)</span>
-        </button>
-
-        <button
-          onClick={() => setIsLocked(true)}
-          className="px-2.5 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-[11px] font-medium text-amber-300 transition-all flex items-center gap-1"
-        >
-          <Lock className="w-3 h-3" />
-          <span>Lock ({recoveryPin} / Decoy 0000)</span>
-        </button>
-      </div>
-
-      {/* =========================================================
-          REALISTIC FLAGSHIP MOBILE FRAME (iPhone 16 Pro Dimensions / Full Mobile)
-         ========================================================= */}
-      <div className="relative z-10 w-full sm:max-w-[400px] h-[100dvh] sm:h-[820px] sm:max-h-[88vh] bg-[#09090B] sm:rounded-[48px] sm:border-[8px] sm:border-[#1F1F24] shadow-[0_25px_90px_rgba(0,0,0,0.85),0_0_0_1px_rgba(255,255,255,0.08)] flex flex-col overflow-hidden">
-        {/* iOS STATUS BAR & DYNAMIC ISLAND */}
-        <div className="pt-3 pb-2 px-6 flex items-center justify-between text-[12px] font-semibold text-zinc-200 bg-[#09090B]/90 backdrop-blur-md z-30 shrink-0">
-          <span>9:41</span>
-          <div className="w-28 h-5 bg-black rounded-full border border-white/5 flex items-center justify-between px-2.5">
-            <span className="text-[9px] font-mono text-zinc-500">
-              {decoyModeActive ? 'SAFE' : 'BLINK'}
-            </span>
-            <span
-              className={`w-2 h-2 rounded-full ${
-                decoyModeActive
-                  ? 'bg-amber-400'
-                  : ghostMode
-                  ? 'bg-violet-400'
-                  : 'bg-[#00F5A0] animate-pulse'
-              }`}
-            />
-          </div>
-          <div className="flex items-center gap-1.5 text-zinc-400">
-            <Shield className="w-3.5 h-3.5 text-[#00F5A0]" />
-            <span className="text-[10px] font-mono">E2EE</span>
-          </div>
-        </div>
-
+      {/* NATIVE APP CONTAINER (FULL SCREEN MOBILE / SLEEK DESKTOP) */}
+      <div className="relative z-10 w-full sm:max-w-[420px] h-[100dvh] sm:h-[880px] sm:max-h-[94vh] bg-[#09090B] sm:rounded-3xl sm:border sm:border-white/10 shadow-[0_25px_90px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden">
         {/* DECOY SAFE MODE ACTIVE BANNER */}
         {decoyModeActive && (
           <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-1.5 flex items-center justify-between text-[11px] text-amber-300 z-30">
@@ -1315,7 +1313,7 @@ export const App: React.FC = () => {
                     isGeneratingId ? 'text-[#00F5A0] blur-[0.5px]' : 'text-white'
                   }`}
                 >
-                  {myCode}
+                  {myCode.replace(/\D/g, '')}
                 </span>
               </div>
 
@@ -1477,7 +1475,7 @@ export const App: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-1.5">
-                {/* My 6-Digit Code & QR Trigger Pill */}
+                {/* My 6-Digit Code & QR Trigger Pill (PURE 6 DIGITS, NO DASH) */}
                 <button
                   onClick={() => {
                     setPopoverTab('qr');
@@ -1486,7 +1484,18 @@ export const App: React.FC = () => {
                   className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 px-2.5 py-1.5 rounded-full transition-all cursor-pointer"
                 >
                   <QrCode className="w-3.5 h-3.5 text-[#00F5A0]" />
-                  <span className="text-xs font-mono font-semibold text-zinc-200">{myCode}</span>
+                  <span className="text-xs font-mono font-semibold text-zinc-200">
+                    {myCode.replace(/\D/g, '')}
+                  </span>
+                </button>
+
+                {/* Settings Tab Button */}
+                <button
+                  onClick={() => setShowSettingsModal(true)}
+                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-400 hover:text-white transition-all cursor-pointer"
+                  title="Settings & Security"
+                >
+                  <Settings className="w-4 h-4" />
                 </button>
 
                 {/* Ghost Mode Toggle */}
@@ -1526,10 +1535,21 @@ export const App: React.FC = () => {
                   type="text"
                   value={connectCodeInput}
                   onChange={(e) => setConnectCodeInput(e.target.value)}
-                  placeholder="Enter 6-digit code (e.g. 742-109) or @handle"
+                  placeholder="Enter 6-digit code (e.g. 742109) or @handle"
                   className="flex-1 bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none"
                   autoFocus
                 />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowConnectSheet(false);
+                    setShowCameraModal(true);
+                  }}
+                  className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#00F5A0] cursor-pointer"
+                  title="Scan QR with Camera"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
                 <button
                   type="submit"
                   className="px-3 py-1.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-black text-xs cursor-pointer"
@@ -2549,15 +2569,15 @@ export const App: React.FC = () => {
                     <span className="text-[10px] uppercase tracking-wider text-zinc-500 block">
                       Your Zero-Login 6-Digit Code
                     </span>
-                    <div className="text-xl font-mono font-bold text-[#00F5A0] tracking-wider mt-0.5">
-                      {myCode}
+                    <div className="text-2xl font-mono font-black text-[#00F5A0] tracking-widest mt-0.5">
+                      {myCode.replace(/\D/g, '')}
                     </div>
                   </div>
 
                   <div className="flex gap-2">
                     <button
                       onClick={() => {
-                        navigator.clipboard?.writeText(myCode);
+                        navigator.clipboard?.writeText(myCode.replace(/\D/g, ''));
                         setCopied(true);
                         audio.play('tap');
                         setTimeout(() => setCopied(false), 1500);
@@ -2590,27 +2610,25 @@ export const App: React.FC = () => {
                       Align friend's QR code inside frame
                     </span>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="space-y-2">
                     <button
                       onClick={() => {
                         setShowQrPinPopover(false);
                         setShowCameraModal(true);
                       }}
-                      className="flex-1 py-2 rounded-xl bg-[#00F5A0] text-zinc-950 font-bold text-xs cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
                     >
                       <Camera className="w-3.5 h-3.5" />
-                      <span>Open Live Camera</span>
+                      <span>Open Live Camera Scanner</span>
                     </button>
                     <button
                       onClick={() => {
-                        setShowQrPinPopover(false);
-                        setConnectCodeInput('840-291');
-                        setShowConnectSheet(true);
-                        setScreen('list');
+                        connectDirectly('840291', 'Kabir • Partner');
                       }}
-                      className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 font-semibold text-xs cursor-pointer"
+                      className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-200 font-semibold text-xs cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      Demo Scan
+                      <Sparkles className="w-3.5 h-3.5 text-[#00F5A0]" />
+                      <span>Instant Scan Demo (840291)</span>
                     </button>
                   </div>
                 </div>
@@ -2764,16 +2782,211 @@ export const App: React.FC = () => {
             if (code.includes('code=')) {
               code = code.split('code=')[1].split('&')[0];
             }
-            setConnectCodeInput(code);
-            setShowConnectSheet(true);
-            setScreen('list');
+            connectDirectly(code);
           }}
         />
 
-        {/* iOS Home Indicator */}
-        <div className="py-2 bg-[#09090B] flex justify-center shrink-0">
-          <div className="w-32 h-1 rounded-full bg-white/20" />
-        </div>
+        {/* =========================================================
+            SETTINGS & IDENTITY MODAL (MANAGE CODE WITHOUT DASH)
+           ========================================================= */}
+        {showSettingsModal && (
+          <div className="absolute inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="w-full max-w-[340px] bg-[#141419] border border-white/15 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <span className="text-sm font-bold text-white flex items-center gap-2">
+                  <Settings className="w-4 h-4 text-[#00F5A0]" />
+                  Settings & Security
+                </span>
+                <button
+                  onClick={() => setShowSettingsModal(false)}
+                  className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* 1. 6-Digit Code (No Dash) */}
+              <div className="p-3.5 rounded-2xl bg-black/60 border border-[#00F5A0]/30 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400">
+                    Your 6-Digit Stealth Code
+                  </span>
+                  <span className="text-[9px] text-[#00F5A0] font-mono">Zero Login • No Trace</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl font-mono font-black tracking-widest text-[#00F5A0]">
+                    {myCode.replace(/\D/g, '')}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        navigator.clipboard?.writeText(myCode.replace(/\D/g, ''));
+                        setCopied(true);
+                        audio.play('tap');
+                        setTimeout(() => setCopied(false), 1500);
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                    >
+                      {copied ? <Check className="w-3 h-3 text-[#00F5A0]" /> : <Copy className="w-3 h-3" />}
+                      <span>{copied ? 'Copied' : 'Copy'}</span>
+                    </button>
+                    <button
+                      onClick={() => setShowRegenerateDisclaimer(true)}
+                      className="p-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 cursor-pointer"
+                      title="Regenerate Code"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Your Handle */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400 block">
+                  Anonymous @Handle
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={myHandle}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setMyHandle(val);
+                      const clean = val.replace(/^@/, '').trim();
+                      if (clean) {
+                        const pin = handleToPin(clean).slice(0, 6);
+                        setMyCode(pin);
+                      }
+                    }}
+                    className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-[#00F5A0]/40"
+                  />
+                  <button
+                    onClick={() => {
+                      audio.play('receive');
+                      const clean = myHandle.replace(/^@/, '').trim();
+                      StorageService.saveProfile({
+                        id: 'usr_' + clean,
+                        handle: clean,
+                        displayName: clean,
+                        avatarId: 1,
+                        vibe: '',
+                        isAvailable: true,
+                        country: 'India',
+                        state: 'Delhi',
+                        city: 'New Delhi',
+                        lastActive: Date.now(),
+                        pin: recoveryPin,
+                      });
+                      alert('Handle & Code saved successfully!');
+                    }}
+                    className="px-3 py-2 rounded-xl bg-[#00F5A0] text-black font-bold text-xs cursor-pointer shadow-md"
+                  >
+                    Save
+                  </button>
+                </div>
+              </div>
+
+              {/* 3. 4-Digit Security PIN */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400 block">
+                  4-Digit App Lock & Recovery PIN
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    maxLength={4}
+                    value={recoveryPin}
+                    onChange={(e) => setRecoveryPin(e.target.value.replace(/\D/g, ''))}
+                    className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-center font-mono text-sm tracking-[0.5em] text-[#00F5A0] focus:outline-none"
+                  />
+                  <button
+                    onClick={() => {
+                      localStorage.setItem('blink_recovery_pin', recoveryPin);
+                      audio.play('receive');
+                      alert('Recovery PIN updated to ' + recoveryPin);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs cursor-pointer"
+                  >
+                    Update
+                  </button>
+                </div>
+                <p className="text-[9px] text-zinc-500">
+                  Decoy PIN: <span className="text-amber-400 font-mono">0000</span> (opens safe decoy chats).
+                </p>
+              </div>
+
+              {/* 4. Privacy & Toggles */}
+              <div className="space-y-2 pt-1 border-t border-white/10">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-300 flex items-center gap-1.5">
+                    <Ghost className="w-3.5 h-3.5 text-violet-400" />
+                    Ghost Mode (Appear Offline)
+                  </span>
+                  <button
+                    onClick={() => setGhostMode(!ghostMode)}
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
+                      ghostMode ? 'bg-violet-600' : 'bg-zinc-800'
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-white transition-transform ${
+                        ghostMode ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-300 flex items-center gap-1.5">
+                    <Volume2 className="w-3.5 h-3.5 text-[#00F5A0]" />
+                    Tactile Audio Sound FX
+                  </span>
+                  <button
+                    onClick={() => setMuted(!muted)}
+                    className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
+                      !muted ? 'bg-[#00F5A0]' : 'bg-zinc-800'
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 rounded-full bg-black transition-transform ${
+                        !muted ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* 5. Danger Zone */}
+              <div className="pt-2 border-t border-white/10 space-y-2">
+                <button
+                  onClick={() => {
+                    setIsLocked(true);
+                    setShowSettingsModal(false);
+                  }}
+                  className="w-full py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs font-semibold text-zinc-200 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Lock className="w-3.5 h-3.5 text-[#00F5A0]" />
+                  <span>Lock Vault Now</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (window.confirm('Wipe all secret chats and restore fresh state?')) {
+                      StorageService.clearAll();
+                      localStorage.clear();
+                      window.location.reload();
+                    }
+                  }}
+                  className="w-full py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-semibold text-rose-300 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Emergency Wipe All Data</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
