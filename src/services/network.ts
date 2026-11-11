@@ -58,6 +58,13 @@ export interface RoomSubscriptionCallbacks {
   onScreenshotAlert?: (data: { handle: string }) => void;
 }
 
+export interface InboxSubscriptionCallbacks {
+  onIncomingMessage?: (payload: { message: any; room: any }) => void;
+  onHandshakeRequest?: (payload: { fromUser: any; reqId?: string }) => void;
+  onHandshakeAccepted?: (payload: { fromUser: any }) => void;
+  onPeerConnected?: (payload: { handle: string; displayName?: string; avatarId?: number }) => void;
+}
+
 export class NetworkService {
   private static getBroadcastChannel(normId: string): BroadcastChannel {
     let bc = activeBroadcastChannels.get(normId);
@@ -687,6 +694,7 @@ export class NetworkService {
   static async findProfileByPin(pinOrHandle: string): Promise<UserProfile | null> {
     if (!supabase || !pinOrHandle) return null;
     const clean = pinOrHandle.trim().toLowerCase().replace(/[@\s-]/g, '');
+    if (!clean) return null;
 
     try {
       // 1. Direct handle match
@@ -708,18 +716,19 @@ export class NetworkService {
           state: directData.state || '',
           city: directData.city || 'New Delhi',
           lastActive: Date.now(),
-          pin: handleToPin(directData.handle),
+          pin: handleToPin(directData.handle).slice(0, 6),
         };
       }
 
-      // 2. Scan profiles to match 6-digit PIN
+      // 2. Scan recent active profiles to match 6-digit PIN
       const { data: allProfiles } = await supabase
         .from('profiles')
         .select('*')
-        .limit(200);
+        .order('last_seen', { ascending: false })
+        .limit(300);
 
       if (allProfiles && allProfiles.length > 0) {
-        const match = allProfiles.find((p: any) => handleToPin(p.handle) === clean);
+        const match = allProfiles.find((p: any) => handleToPin(p.handle).slice(0, 6) === clean);
         if (match) {
           return {
             id: match.id || 'usr_' + match.handle,
@@ -737,6 +746,32 @@ export class NetworkService {
         }
       }
 
+      // 3. Fallback: ilike search on display_name or handle if string was text
+      if (!/^\d+$/.test(clean) && clean.length >= 3) {
+        const { data: fuzzy } = await supabase
+          .from('profiles')
+          .select('*')
+          .or(`handle.ilike.%${clean}%,display_name.ilike.%${clean}%`)
+          .limit(1);
+
+        if (fuzzy && fuzzy[0]) {
+          const row = fuzzy[0];
+          return {
+            id: row.id || 'usr_' + row.handle,
+            handle: row.handle,
+            displayName: row.display_name || row.handle,
+            avatarId: row.avatar_id || 1,
+            vibe: row.vibe || '',
+            isAvailable: row.is_available ?? true,
+            country: row.country || 'India',
+            state: row.state || '',
+            city: row.city || 'New Delhi',
+            lastActive: Date.now(),
+            pin: handleToPin(row.handle).slice(0, 6),
+          };
+        }
+      }
+
       return null;
     } catch (err) {
       console.warn('Failed to find profile by PIN:', err);
@@ -745,9 +780,152 @@ export class NetworkService {
   }
 
   /**
+   * Subscribe to the current user's personal realtime inbox channel
+   */
+  static subscribeToInbox(
+    userHandle: string,
+    callbacks: InboxSubscriptionCallbacks
+  ): () => void {
+    if (!userHandle || !supabase) return () => {};
+    const cleanHandle = userHandle.toLowerCase().replace(/^@/, '').trim();
+    const inboxName = `inbox_${cleanHandle}`;
+
+    try {
+      const existing = activeSupabaseChannels.get(inboxName);
+      if (existing) {
+        supabase.removeChannel(existing);
+        activeSupabaseChannels.delete(inboxName);
+      }
+
+      const ch = supabase.channel(inboxName, {
+        config: { broadcast: { self: false } },
+      });
+
+      ch.on('broadcast', { event: 'incoming_message' }, ({ payload }) => {
+        if (payload && callbacks.onIncomingMessage) {
+          callbacks.onIncomingMessage(payload);
+        }
+      });
+
+      ch.on('broadcast', { event: 'handshake_request' }, ({ payload }) => {
+        if (payload && callbacks.onHandshakeRequest) {
+          callbacks.onHandshakeRequest(payload);
+        }
+      });
+
+      ch.on('broadcast', { event: 'handshake_accepted' }, ({ payload }) => {
+        if (payload && callbacks.onHandshakeAccepted) {
+          callbacks.onHandshakeAccepted(payload);
+        }
+      });
+
+      ch.on('broadcast', { event: 'peer_connected' }, ({ payload }) => {
+        if (payload && callbacks.onPeerConnected) {
+          callbacks.onPeerConnected(payload);
+        }
+      });
+
+      ch.subscribe();
+      activeSupabaseChannels.set(inboxName, ch);
+
+      return () => {
+        if (ch) {
+          supabase.removeChannel(ch);
+          activeSupabaseChannels.delete(inboxName);
+        }
+      };
+    } catch (e) {
+      console.warn('Inbox subscription error:', e);
+      return () => {};
+    }
+  }
+
+  /**
+   * Send Handshake Request to partner's inbox
+   */
+  static async sendHandshakeRequest(
+    targetHandle: string,
+    fromUser: Partial<UserProfile> & { handle: string }
+  ): Promise<void> {
+    if (!supabase || !targetHandle) return;
+    const cleanTarget = targetHandle.toLowerCase().replace(/^@/, '').trim();
+    const inboxName = `inbox_${cleanTarget}`;
+
+    try {
+      let ch = activeSupabaseChannels.get(inboxName);
+      if (!ch) {
+        ch = supabase.channel(inboxName, {
+          config: { broadcast: { self: false } },
+        });
+        ch.subscribe();
+        activeSupabaseChannels.set(inboxName, ch);
+      }
+
+      await ch.send({
+        type: 'broadcast',
+        event: 'handshake_request',
+        payload: {
+          fromUser: {
+            id: fromUser.id || 'usr_' + fromUser.handle,
+            handle: fromUser.handle,
+            displayName: fromUser.displayName || fromUser.handle,
+            avatarId: fromUser.avatarId || 1,
+            code: handleToPin(fromUser.handle).slice(0, 6),
+          },
+          reqId: 'req_' + Date.now(),
+        },
+      });
+    } catch (err) {
+      console.warn('Failed to send handshake request:', err);
+    }
+  }
+
+  /**
+   * Send Handshake Accept to partner's inbox
+   */
+  static async sendHandshakeAccept(
+    targetHandle: string,
+    fromUser: Partial<UserProfile> & { handle: string }
+  ): Promise<void> {
+    if (!supabase || !targetHandle) return;
+    const cleanTarget = targetHandle.toLowerCase().replace(/^@/, '').trim();
+    const inboxName = `inbox_${cleanTarget}`;
+
+    try {
+      let ch = activeSupabaseChannels.get(inboxName);
+      if (!ch) {
+        ch = supabase.channel(inboxName, {
+          config: { broadcast: { self: false } },
+        });
+        ch.subscribe();
+        activeSupabaseChannels.set(inboxName, ch);
+      }
+
+      await ch.send({
+        type: 'broadcast',
+        event: 'handshake_accepted',
+        payload: {
+          fromUser: {
+            id: fromUser.id || 'usr_' + fromUser.handle,
+            handle: fromUser.handle,
+            displayName: fromUser.displayName || fromUser.handle,
+            avatarId: fromUser.avatarId || 1,
+            code: handleToPin(fromUser.handle).slice(0, 6),
+          },
+        },
+      });
+    } catch (err) {
+      console.warn('Failed to send handshake accept:', err);
+    }
+  }
+
+  /**
    * Broadcast a peer connection notice so the friend's device receives an immediate handshake
    */
-  static async sendPeerConnectedNotice(targetHandle: string, fromUser: UserProfile): Promise<void> {
+  static async sendPeerConnectedNotice(
+    targetHandle: string,
+    fromUser: Partial<UserProfile> & { handle: string }
+  ): Promise<void> {
     if (!supabase || !targetHandle) return;
     const inboxName = `inbox_${targetHandle.toLowerCase().replace(/^@/, '')}`;
 

@@ -37,6 +37,7 @@ import {
 import { StorageService } from './services/storage';
 import { NetworkService, supabase, handleToPin } from './services/network';
 import { QRScannerModal } from './components/QRScannerModal';
+import { UserProfile } from './types';
 
 // ==========================================
 // SUBTLE TACTILE AUDIO ENGINE
@@ -184,26 +185,7 @@ interface HandshakeRequest {
   time: string;
 }
 
-const INITIAL_REQUESTS: HandshakeRequest[] = [
-  {
-    id: 'req1',
-    name: 'Zoya • Design',
-    handle: '@zoya_ui',
-    code: '771409',
-    avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
-    via: 'Scanned your QR Code',
-    time: '1m ago',
-  },
-  {
-    id: 'req2',
-    name: 'Dev_Phantom',
-    handle: '@phantom_0x',
-    code: '512883',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-    via: 'Entered your 6-Digit Code',
-    time: '9m ago',
-  },
-];
+const INITIAL_REQUESTS: HandshakeRequest[] = [];
 
 const DECOY_CONTACTS: ContactItem[] = [
   {
@@ -261,133 +243,9 @@ const DECOY_CHATS: Record<string, MessageItem[]> = {
   ],
 };
 
-const INITIAL_CONTACTS: ContactItem[] = [
-  {
-    id: 'c1',
-    name: 'Aria ✨',
-    handle: '@aria_v',
-    code: '904112',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    color: 'from-indigo-500 to-violet-500',
-    online: true,
-    unread: 0,
-    time: 'Now',
-  },
-  {
-    id: 'c2',
-    name: 'Kabir • Bro',
-    handle: '@kabir_x',
-    code: '318774',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    color: 'from-emerald-500 to-teal-500',
-    online: true,
-    unread: 2,
-    time: '2m',
-  },
-  {
-    id: 'c3',
-    name: 'Riya (Private)',
-    handle: '@riya_sec',
-    code: '629401',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80',
-    color: 'from-rose-500 to-orange-500',
-    online: false,
-    unread: 1,
-    time: '18m',
-  },
-];
+const INITIAL_CONTACTS: ContactItem[] = [];
 
-const INITIAL_CHATS: Record<string, MessageItem[]> = {
-  c1: [
-    {
-      id: 'm1',
-      sender: 'them',
-      type: 'text',
-      text: 'Hey! Code add kar liya maine. Sabse best baat—na phone number laga na email ✨',
-      timerMode: '30s',
-      totalSeconds: 30,
-      remainingSeconds: 24,
-      seen: true,
-      shielded: false,
-      reactions: ['❤️'],
-      time: '10:41 PM',
-      disintegrating: false,
-    },
-    {
-      id: 'm2',
-      sender: 'them',
-      type: 'text',
-      text: 'Is secret message ko padhne ke liye apni ungli daba kar rakho (Hold to Reveal) 🤫',
-      timerMode: 'burn',
-      totalSeconds: 4,
-      remainingSeconds: 4,
-      seen: false,
-      shielded: true,
-      reactions: ['🔥'],
-      time: '10:42 PM',
-      disintegrating: false,
-    },
-    {
-      id: 'm3',
-      sender: 'me',
-      type: 'text',
-      text: 'Dekho! Jab tak tum message read nahi karogi, mera 10s timer start hi nahi hoga.',
-      timerMode: '10s',
-      totalSeconds: 10,
-      remainingSeconds: 10,
-      seen: false,
-      shielded: false,
-      reactions: [],
-      time: '10:42 PM',
-      disintegrating: false,
-    },
-  ],
-  c2: [
-    {
-      id: 'm21',
-      sender: 'them',
-      type: 'text',
-      text: 'Bhai 4-digit recovery PIN set kar liya? Naye phone me bas wahi kaam aayega.',
-      timerMode: '30s',
-      totalSeconds: 30,
-      remainingSeconds: 30,
-      seen: false,
-      shielded: false,
-      time: '10:35 PM',
-      disintegrating: false,
-    },
-    {
-      id: 'm22',
-      sender: 'them',
-      type: 'voice',
-      text: 'Voice Note (0:05)',
-      duration: '0:05',
-      timerMode: 'burn',
-      totalSeconds: 4,
-      remainingSeconds: 4,
-      seen: false,
-      shielded: false,
-      time: '10:36 PM',
-      disintegrating: false,
-    },
-  ],
-  c3: [
-    {
-      id: 'm31',
-      sender: 'them',
-      type: 'photo',
-      text: 'Ephemeral Photo',
-      caption: 'Midnight Coffee Run ☕✨',
-      timerMode: '10s',
-      totalSeconds: 10,
-      remainingSeconds: 10,
-      seen: false,
-      shielded: true,
-      time: '9:50 PM',
-      disintegrating: false,
-    },
-  ],
-};
+const INITIAL_CHATS: Record<string, MessageItem[]> = {};
 
 export const App: React.FC = () => {
   // Navigation: 'onboarding' | 'list' | 'chat'
@@ -395,10 +253,39 @@ export const App: React.FC = () => {
     return StorageService.getProfile() ? 'list' : 'onboarding';
   });
 
-  const [activeContactId, setActiveContactId] = useState<string>('c1');
-  const [contacts, setContacts] = useState<ContactItem[]>(INITIAL_CONTACTS);
-  const [chats, setChats] = useState<Record<string, MessageItem[]>>(INITIAL_CHATS);
-  const [pendingRequests, setPendingRequests] = useState<HandshakeRequest[]>(INITIAL_REQUESTS);
+  const [activeContactId, setActiveContactId] = useState<string>(() => {
+    return localStorage.getItem('blink_active_contact_id') || '';
+  });
+  const [contacts, setContacts] = useState<ContactItem[]>(() => {
+    const saved = localStorage.getItem('blink_contacts_list');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    return [];
+  });
+  const [chats, setChats] = useState<Record<string, MessageItem[]>>(() => {
+    const saved = localStorage.getItem('blink_chat_history');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch {}
+    }
+    return {};
+  });
+  const [pendingRequests, setPendingRequests] = useState<HandshakeRequest[]>(() => {
+    const saved = localStorage.getItem('blink_pending_requests');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    return [];
+  });
   const [showRequestsDrawer, setShowRequestsDrawer] = useState<boolean>(true);
 
   // User Identity & Privacy Controls
@@ -420,7 +307,8 @@ export const App: React.FC = () => {
   const [decoyModeActive, setDecoyModeActive] = useState<boolean>(false);
   const [ghostMode, setGhostMode] = useState<boolean>(false);
   const [muted, setMuted] = useState<boolean>(false);
-  const [autoSeenSim, setAutoSeenSim] = useState<boolean>(true);
+  const [autoSeenSim, setAutoSeenSim] = useState<boolean>(false);
+  const [screenshotToast, setScreenshotToast] = useState<string | null>(null);
 
   // Onboarding & Account Restore State
   const [isGeneratingId, setIsGeneratingId] = useState<boolean>(false);
@@ -436,6 +324,10 @@ export const App: React.FC = () => {
   const [pinSavedToast, setPinSavedToast] = useState<boolean>(false);
   const [showConnectSheet, setShowConnectSheet] = useState<boolean>(false);
   const [connectCodeInput, setConnectCodeInput] = useState<string>('');
+  const [searchTargetProfile, setSearchTargetProfile] = useState<UserProfile | null>(null);
+  const [isSearchingTarget, setIsSearchingTarget] = useState<boolean>(false);
+  const [targetSearchError, setTargetSearchError] = useState<string | null>(null);
+  const [handshakeSentToast, setHandshakeSentToast] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showCameraModal, setShowCameraModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
@@ -478,10 +370,22 @@ export const App: React.FC = () => {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const sendHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeContactsList = decoyModeActive ? DECOY_CONTACTS : contacts;
   const activeChatsMap = decoyModeActive ? DECOY_CHATS : chats;
-  const activeContact = activeContactsList.find((c) => c.id === activeContactId) || activeContactsList[0];
+  const fallbackContact: ContactItem = {
+    id: 'placeholder',
+    name: 'Stealth Chat',
+    handle: '@peer',
+    code: '000000',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    online: false,
+    unread: 0,
+    time: 'Now',
+  };
+  const activeContact = activeContactsList.find((c) => c.id === activeContactId) || activeContactsList[0] || fallbackContact;
   const currentMessages = activeChatsMap[activeContact?.id] || [];
 
   useEffect(() => {
@@ -496,6 +400,423 @@ export const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('blink_recovery_pin', recoveryPin);
   }, [recoveryPin]);
+
+  useEffect(() => {
+    if (activeContactId) {
+      localStorage.setItem('blink_active_contact_id', activeContactId);
+    }
+  }, [activeContactId]);
+
+  // Persist contacts, chats, and requests
+  useEffect(() => {
+    localStorage.setItem('blink_contacts_list', JSON.stringify(contacts));
+  }, [contacts]);
+
+  useEffect(() => {
+    localStorage.setItem('blink_chat_history', JSON.stringify(chats));
+  }, [chats]);
+
+  useEffect(() => {
+    localStorage.setItem('blink_pending_requests', JSON.stringify(pendingRequests));
+  }, [pendingRequests]);
+
+  // Sync profile to Supabase
+  useEffect(() => {
+    const clean = myHandle.replace(/^@/, '');
+    const p: UserProfile = {
+      id: 'usr_' + clean,
+      handle: clean,
+      displayName: myHandle,
+      avatarId: 1,
+      vibe: '⚡ Stealth Tunnel',
+      isAvailable: !ghostMode,
+      country: 'India',
+      state: '',
+      city: '',
+      lastActive: Date.now(),
+      pin: myCode.replace(/\D/g, ''),
+    };
+    NetworkService.syncProfileToSupabase(p).catch(() => {});
+  }, [myHandle, myCode, ghostMode]);
+
+  // Realtime Screenshot Detection (Detects PrintScreen & Win/Mac Snip Shortcuts)
+  useEffect(() => {
+    if (screen !== 'chat' || !activeContact || activeContact.id === 'placeholder') return;
+
+    const handleScreenshotEvent = (e: KeyboardEvent) => {
+      const isPrintScreen = e.key === 'PrintScreen';
+      const isWinSnip = (e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's');
+      const isMacSnip = e.metaKey && e.shiftKey && (e.key === '3' || e.key === '4' || e.key === '5');
+      const isAltPrintScreen = e.altKey && e.key === 'PrintScreen';
+
+      if (isPrintScreen || isWinSnip || isMacSnip || isAltPrintScreen) {
+        audio.play('alert');
+        setScreenshotToast('⚠️ Screenshot attempt recorded & blocked by Phantom Shield!');
+        setTimeout(() => setScreenshotToast(null), 4000);
+
+        const alertMsg: MessageItem = {
+          id: 'sys_' + Date.now(),
+          sender: 'system',
+          type: 'screenshot_alert',
+          text: `🛡️ Screenshot attempt by you blocked by Phantom Shield`,
+          seen: true,
+          totalSeconds: 60,
+          remainingSeconds: 60,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        setChats((prev) => ({
+          ...prev,
+          [activeContact.id]: [...(prev[activeContact.id] || []), alertMsg],
+        }));
+
+        const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+        const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+        const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+        NetworkService.broadcastScreenshotAlert(normRoomId, cleanMe);
+      }
+    };
+
+    window.addEventListener('keyup', handleScreenshotEvent);
+    return () => window.removeEventListener('keyup', handleScreenshotEvent);
+  }, [screen, activeContact, myHandle]);
+
+  // Live Supabase Global Inbox Subscription (Realtime Pushes for Incoming Messages & Handshakes)
+  useEffect(() => {
+    if (!myHandle) return;
+    const cleanHandle = myHandle.replace(/^@/, '').toLowerCase().trim();
+
+    const unsubscribe = NetworkService.subscribeToInbox(cleanHandle, {
+      onIncomingMessage: (payload: any) => {
+        const { message, room } = payload || {};
+        if (!message) return;
+
+        const peerHandleRaw = room?.peerHandle || message.senderHandle;
+        const peerClean = (peerHandleRaw || '').replace(/^@/, '').toLowerCase();
+        if (!peerClean || peerClean === cleanHandle) return;
+
+        const peerDisplayName = room?.peerDisplayName || message.senderDisplayName || peerClean;
+        const contactId = 'c_' + peerClean;
+
+        // Ensure contact exists in contacts list
+        setContacts((prev) => {
+          const exists = prev.find((c) => c.handle.replace(/^@/, '').toLowerCase() === peerClean);
+          const updatedContact: ContactItem = exists
+            ? {
+                ...exists,
+                name: peerDisplayName || exists.name,
+                unread: activeContactId === exists.id && screen === 'chat' ? 0 : (exists.unread || 0) + 1,
+                time: 'Just now',
+                online: true,
+              }
+            : {
+                id: contactId,
+                name: peerDisplayName,
+                handle: `@${peerClean}`,
+                code: handleToPin(peerClean).slice(0, 6),
+                avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+                color: 'from-emerald-500 to-teal-500',
+                online: true,
+                unread: activeContactId === contactId && screen === 'chat' ? 0 : 1,
+                time: 'Just now',
+              };
+          return [updatedContact, ...prev.filter((c) => c.handle.replace(/^@/, '').toLowerCase() !== peerClean)];
+        });
+
+        // Add message to chats
+        const totalSecs = message.timerSeconds || 30;
+        const isBurn = message.isBurnOnRead || false;
+        const isPhoto = Boolean(message.previewUrl || message.ciphertext?.startsWith('data:image'));
+        const isVoice = message.type === 'voice' || message.iv === 'voice';
+
+        const msgItem: MessageItem = {
+          id: message.id || 'msg_' + Date.now(),
+          sender: 'them',
+          type: isPhoto ? 'photo' : (isVoice ? 'voice' : 'text'),
+          text: message.ciphertext || message.text || '',
+          previewUrl: message.previewUrl,
+          caption: message.caption,
+          duration: message.duration || '0:04',
+          timerMode: isBurn ? 'burn' : (`${totalSecs}s` as any),
+          totalSeconds: totalSecs,
+          remainingSeconds: totalSecs,
+          seen: activeContactId === contactId && screen === 'chat',
+          shielded: message.isHoldToReveal ?? true,
+          reactions: [],
+          time: new Date(message.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          disintegrating: false,
+        };
+
+        setChats((prev) => {
+          const existing = prev[contactId] || [];
+          if (existing.some((m) => m.id === msgItem.id)) return prev;
+          return {
+            ...prev,
+            [contactId]: [...existing, msgItem],
+          };
+        });
+
+        audio.play('receive');
+
+        // Top alert banner if not actively viewing this chat
+        if (screen !== 'chat' || activeContactId !== contactId) {
+          setInAppBanner({
+            name: peerDisplayName,
+            code: handleToPin(peerClean).slice(0, 6),
+            text: msgItem.text.slice(0, 45),
+          });
+          setTimeout(() => setInAppBanner(null), 5000);
+        }
+      },
+
+      onHandshakeRequest: (payload: any) => {
+        const { fromUser } = payload || {};
+        if (!fromUser) return;
+        const reqHandle = (fromUser.handle || '').replace(/^@/, '').toLowerCase();
+        if (reqHandle === cleanHandle) return;
+
+        const req: HandshakeRequest = {
+          id: 'req_' + reqHandle,
+          name: fromUser.displayName || reqHandle,
+          handle: `@${reqHandle}`,
+          code: fromUser.code || handleToPin(reqHandle).slice(0, 6),
+          avatar: fromUser.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
+          via: 'Entered your 6-Digit Code',
+          time: 'Just now',
+        };
+
+        setPendingRequests((prev) => [req, ...prev.filter((r) => r.id !== req.id)]);
+        audio.play('alert');
+        setInAppBanner({
+          name: req.name,
+          code: req.code,
+          text: `Connection Request from ${req.name}!`,
+        });
+        setTimeout(() => setInAppBanner(null), 5000);
+      },
+
+      onHandshakeAccepted: (payload: any) => {
+        const { fromUser } = payload || {};
+        if (!fromUser) return;
+        const pHandle = (fromUser.handle || '').replace(/^@/, '').toLowerCase();
+        const cId = 'c_' + pHandle;
+        const newContact: ContactItem = {
+          id: cId,
+          name: fromUser.displayName || pHandle,
+          handle: `@${pHandle}`,
+          code: fromUser.code || handleToPin(pHandle).slice(0, 6),
+          avatar: fromUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          color: 'from-emerald-500 to-teal-500',
+          online: true,
+          unread: 0,
+          time: 'Just now',
+        };
+        setContacts((prev) => [newContact, ...prev.filter((c) => c.handle.toLowerCase() !== `@${pHandle}`)]);
+        audio.play('receive');
+        setInAppBanner({
+          name: newContact.name,
+          code: newContact.code,
+          text: `${newContact.name} accepted your handshake request!`,
+        });
+        setTimeout(() => setInAppBanner(null), 5000);
+      },
+
+      onPeerConnected: (payload: any) => {
+        if (!payload?.handle) return;
+        const pHandle = payload.handle.replace(/^@/, '').toLowerCase();
+        if (pHandle === cleanHandle) return;
+        const cId = 'c_' + pHandle;
+        setContacts((prev) => {
+          const exists = prev.find((c) => c.handle.replace(/^@/, '').toLowerCase() === pHandle);
+          if (exists) return prev;
+          const newC: ContactItem = {
+            id: cId,
+            name: payload.displayName || pHandle,
+            handle: `@${pHandle}`,
+            code: handleToPin(pHandle).slice(0, 6),
+            avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+            color: 'from-emerald-500 to-teal-500',
+            online: true,
+            unread: 0,
+            time: 'Just now',
+          };
+          return [newC, ...prev];
+        });
+        audio.play('receive');
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [myHandle, screen, activeContactId]);
+
+  // Live Peer Lookup when typing in Connect Sheet
+  useEffect(() => {
+    if (!showConnectSheet) {
+      setSearchTargetProfile(null);
+      setTargetSearchError(null);
+      return;
+    }
+
+    const raw = connectCodeInput.trim();
+    const cleanDigits = raw.replace(/\D/g, '');
+    const cleanHandle = raw.replace(/^@/, '').trim();
+
+    if (cleanDigits.length < 6 && cleanHandle.length < 3) {
+      setSearchTargetProfile(null);
+      setTargetSearchError(null);
+      setIsSearchingTarget(false);
+      return;
+    }
+
+    setIsSearchingTarget(true);
+    setTargetSearchError(null);
+
+    const timer = setTimeout(async () => {
+      try {
+        const found = await NetworkService.findProfileByPin(raw);
+        if (found) {
+          if (found.handle.toLowerCase() === myHandle.replace(/^@/, '').toLowerCase()) {
+            setTargetSearchError('This is your own code / handle!');
+            setSearchTargetProfile(null);
+          } else {
+            setSearchTargetProfile(found);
+            setTargetSearchError(null);
+          }
+        } else {
+          setSearchTargetProfile(null);
+          if (cleanDigits.length === 6) {
+            setTargetSearchError(`No online peer found with PIN ${cleanDigits}.`);
+          }
+        }
+      } catch {
+        setTargetSearchError('Failed to query stealth network.');
+      } finally {
+        setIsSearchingTarget(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [connectCodeInput, showConnectSheet, myHandle]);
+
+  // Live Supabase Room Subscription (Messages, Typing, Delivery ACK, Screenshot Alerts)
+  useEffect(() => {
+    if (screen !== 'chat' || !activeContact || decoyModeActive || activeContact.id === 'placeholder') {
+      return;
+    }
+
+    const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+    const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+    const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+
+    const unsubscribe = NetworkService.subscribeToRoom(normRoomId, {
+      onMessage: (payload: any) => {
+        if (!payload) return;
+        const senderHandle = (payload.senderHandle || '').toLowerCase();
+        if (senderHandle === cleanMe) return;
+
+        const total = payload.timerSeconds || 30;
+        const isVoice = payload.iv === 'voice' || payload.ciphertext?.startsWith('🎤');
+        const isPhoto = Boolean(payload.mediaUrl);
+
+        const incomingMsg: MessageItem = {
+          id: payload.id || 'msg_' + Date.now(),
+          sender: 'them',
+          type: isPhoto ? 'photo' : (isVoice ? 'voice' : 'text'),
+          text: payload.ciphertext || payload.text || '',
+          previewUrl: payload.mediaUrl,
+          caption: payload.caption,
+          duration: payload.audioDuration ? `0:0${payload.audioDuration}` : '0:04',
+          timerMode: payload.isBurnOnRead ? 'burn' : (`${total}s` as any),
+          totalSeconds: total,
+          remainingSeconds: total,
+          seen: false,
+          shielded: payload.isHoldToReveal ?? true,
+          reactions: [],
+          time: new Date(payload.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          disintegrating: false,
+        };
+
+        audio.play('receive');
+        setChats((prev) => ({
+          ...prev,
+          [activeContact.id]: [
+            ...(prev[activeContact.id] || []).filter((m) => m.id !== incomingMsg.id),
+            incomingMsg,
+          ],
+        }));
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+
+        NetworkService.broadcastDeliveryAck(normRoomId, incomingMsg.id, 'delivered');
+      },
+
+      onTyping: (handle: string) => {
+        if (handle && handle.toLowerCase() !== cleanMe) {
+          setRemoteTyping(true);
+          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = setTimeout(() => setRemoteTyping(false), 2500);
+        }
+      },
+
+      onReaction: (data: { msgId: string; reaction?: string }) => {
+        if (!data?.msgId || !data?.reaction) return;
+        setChats((prev) => ({
+          ...prev,
+          [activeContact.id]: (prev[activeContact.id] || []).map((m) => {
+            if (m.id !== data.msgId) return m;
+            const existing = m.reactions || [];
+            return existing.includes(data.reaction!)
+              ? m
+              : { ...m, reactions: [...existing, data.reaction!] };
+          }),
+        }));
+      },
+
+      onScreenshotAlert: (data: { handle: string }) => {
+        audio.play('alert');
+        const peerHandle = data?.handle
+          ? data.handle.startsWith('@')
+            ? data.handle
+            : `@${data.handle}`
+          : activeContact.handle;
+        setScreenshotToast(`🛡️ ${peerHandle} attempted to take a screenshot!`);
+        setTimeout(() => setScreenshotToast(null), 4500);
+
+        const alertMsg: MessageItem = {
+          id: 'sys_' + Date.now(),
+          sender: 'system',
+          type: 'screenshot_alert',
+          text: `🛡️ Screenshot attempt by ${peerHandle} detected and blocked by Phantom Shield`,
+          seen: true,
+          totalSeconds: 60,
+          remainingSeconds: 60,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        setChats((prev) => ({
+          ...prev,
+          [activeContact.id]: [...(prev[activeContact.id] || []), alertMsg],
+        }));
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+      },
+
+      onDeliveryAck: (data: { msgId: string; status: 'delivered' | 'read' }) => {
+        if (data?.status === 'read' && data?.msgId) {
+          setChats((prev) => ({
+            ...prev,
+            [activeContact.id]: (prev[activeContact.id] || []).map((m) =>
+              m.id === data.msgId ? { ...m, seen: true } : m
+            ),
+          }));
+        }
+      },
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [screen, activeContactId, activeContact, myHandle, decoyModeActive]);
 
   // Auto-lock when minimized/hidden if configured
   useEffect(() => {
@@ -584,8 +905,8 @@ export const App: React.FC = () => {
       const randomNum = Math.floor(100 + Math.random() * 899);
       const newHandle = `@${randomName}_${randomNum}`;
       setMyHandle(newHandle);
-      const pin = handleToPin(`${randomName}_${randomNum}`);
-      setMyCode(`${pin.slice(0, 3)}-${pin.slice(3, 6)}`);
+      const pin = handleToPin(`${randomName}_${randomNum}`).slice(0, 6);
+      setMyCode(pin);
       audio.play('tap');
       if (ticks >= 8) {
         clearInterval(iv);
@@ -597,8 +918,13 @@ export const App: React.FC = () => {
 
   // Confirm Regenerate Code from Disclaimer Popup
   const confirmRegenerateCode = () => {
-    const next = `${Math.floor(100 + Math.random() * 899)}-${Math.floor(100 + Math.random() * 899)}`;
-    setMyCode(next);
+    const GHOST_NAMES = ['phantom', 'falcon', 'specter', 'shadow', 'cipher', 'pulsar', 'vortex'];
+    const randomName = GHOST_NAMES[Math.floor(Math.random() * GHOST_NAMES.length)];
+    const randomNum = Math.floor(100 + Math.random() * 899);
+    const newHandle = `@${randomName}_${randomNum}`;
+    setMyHandle(newHandle);
+    const pin = handleToPin(`${randomName}_${randomNum}`).slice(0, 6);
+    setMyCode(pin);
     setShowRegenerateDisclaimer(false);
     audio.play('receive');
   };
@@ -622,10 +948,12 @@ export const App: React.FC = () => {
   const handleAcceptRequest = (req: HandshakeRequest) => {
     audio.play('receive');
     setPendingRequests((prev) => prev.filter((r) => r.id !== req.id));
+    const cleanReqHandle = req.handle.replace(/^@/, '').toLowerCase();
+    const contactId = 'c_' + cleanReqHandle;
     const newContact: ContactItem = {
-      id: req.id,
+      id: contactId,
       name: req.name,
-      handle: req.handle,
+      handle: req.handle.startsWith('@') ? req.handle : `@${req.handle}`,
       code: req.code,
       avatar: req.avatar,
       color: 'from-emerald-500 to-teal-500',
@@ -633,15 +961,15 @@ export const App: React.FC = () => {
       unread: 0,
       time: 'Just now',
     };
-    setContacts((prev) => [newContact, ...prev.filter((c) => c.id !== req.id)]);
+    setContacts((prev) => [newContact, ...prev.filter((c) => c.handle.toLowerCase() !== req.handle.toLowerCase())]);
     setChats((prev) => ({
       ...prev,
-      [req.id]: prev[req.id] || [
+      [contactId]: prev[contactId] || [
         {
           id: 'req_msg_' + Date.now(),
           sender: 'them',
           type: 'text',
-          text: `Hey! Handshake accepted via ${req.code}. Zero-login stealth tunnel is live 🔒✨`,
+          text: `Hey! Handshake accepted via code ${req.code}. Zero-login stealth tunnel is live 🔒✨`,
           timerMode: '30s',
           totalSeconds: 30,
           remainingSeconds: 30,
@@ -653,8 +981,25 @@ export const App: React.FC = () => {
         },
       ],
     }));
-    setActiveContactId(req.id);
+    setActiveContactId(contactId);
     setScreen('chat');
+
+    // Notify partner that request was accepted
+    const myClean = myHandle.replace(/^@/, '').toLowerCase();
+    const myFullProfile: UserProfile = {
+      id: 'usr_' + myClean,
+      handle: myClean,
+      displayName: myHandle.replace(/^@/, ''),
+      avatarId: 1,
+      vibe: '⚡ Stealth Tunnel',
+      isAvailable: true,
+      country: 'India',
+      state: '',
+      city: '',
+      lastActive: Date.now(),
+      pin: myCode.replace(/\D/g, ''),
+    };
+    NetworkService.sendHandshakeAccept(cleanReqHandle, myFullProfile).catch(() => {});
   };
 
   const handleIgnoreRequest = (reqId: string) => {
@@ -809,7 +1154,94 @@ export const App: React.FC = () => {
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
   };
 
-  // Send Selected Secret Ephemeral Photo from Picker Drawer
+  // Real Gallery & Camera Photo Handler
+  const handleGalleryPhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_DIM = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height && width > MAX_DIM) {
+          height = Math.round((height * MAX_DIM) / width);
+          width = MAX_DIM;
+        } else if (height > MAX_DIM) {
+          width = Math.round((width * MAX_DIM) / height);
+          height = MAX_DIM;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        const total = getSeconds(timerMode);
+        const newId = 'p_' + Date.now();
+        const newMsg: MessageItem = {
+          id: newId,
+          sender: 'me',
+          type: 'photo',
+          text: 'Secret Ephemeral Photo',
+          previewUrl: compressedDataUrl,
+          timerMode,
+          totalSeconds: total,
+          remainingSeconds: total,
+          seen: false,
+          shielded: true,
+          reactions: [],
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          disintegrating: false,
+        };
+
+        audio.play('send');
+        setChats((prev) => ({
+          ...prev,
+          [activeContact.id]: [...(prev[activeContact.id] || []), newMsg],
+        }));
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+        // Broadcast to Supabase Realtime
+        if (activeContact && !decoyModeActive && activeContact.id !== 'placeholder') {
+          const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+          const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+          const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+          NetworkService.broadcastMessage(
+            normRoomId,
+            {
+              id: newId,
+              roomId: normRoomId,
+              senderId: 'usr_' + cleanMe,
+              senderHandle: cleanMe,
+              senderDisplayName: myHandle,
+              ciphertext: '📷 Ephemeral Photo',
+              iv: 'photo',
+              mediaUrl: compressedDataUrl,
+              createdAt: Date.now(),
+              timerSeconds: total,
+              expiresAt: 0,
+              isBurnOnRead: timerMode === 'burn',
+              isHoldToReveal: true,
+              status: 'sent',
+            },
+            activeContact.code,
+            cleanThem
+          ).catch(() => {});
+        }
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Send Selected Secret Ephemeral Photo
   const handleSendPhoto = (preset = EPHEMERAL_PHOTO_PRESETS[0]) => {
     const total = getSeconds(timerMode);
     const newId = 'p_' + Date.now();
@@ -834,9 +1266,37 @@ export const App: React.FC = () => {
     setCustomPhotoCaption('');
     setChats((prev) => ({
       ...prev,
-      [activeContactId]: [...(prev[activeContactId] || []), newMsg],
+      [activeContact.id]: [...(prev[activeContact.id] || []), newMsg],
     }));
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+    // Broadcast to Supabase Realtime
+    if (activeContact && !decoyModeActive && activeContact.id !== 'placeholder') {
+      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+      NetworkService.broadcastMessage(
+        normRoomId,
+        {
+          id: newId,
+          roomId: normRoomId,
+          senderId: 'usr_' + cleanMe,
+          senderHandle: cleanMe,
+          senderDisplayName: myHandle,
+          ciphertext: customPhotoCaption.trim() ? `📷 ${customPhotoCaption.trim()}` : '📷 Ephemeral Photo',
+          iv: 'photo',
+          mediaUrl: preset.previewUrl,
+          createdAt: Date.now(),
+          timerSeconds: total,
+          expiresAt: 0,
+          isBurnOnRead: timerMode === 'burn',
+          isHoldToReveal: true,
+          status: 'sent',
+        },
+        activeContact.code,
+        cleanThem
+      ).catch(() => {});
+    }
   };
 
   const markMessageSeen = (chatId: string, msgId: string) => {
@@ -949,7 +1409,7 @@ export const App: React.FC = () => {
   };
 
   // Connect directly by code or handle and open chat immediately
-  const connectDirectly = (rawTarget: string, customName?: string) => {
+  const connectDirectly = async (rawTarget: string, customName?: string) => {
     if (!rawTarget) return;
     const cleanDigits = rawTarget.replace(/\D/g, '');
     const cleanHandle = rawTarget.toLowerCase().replace(/^@/, '').trim();
@@ -983,132 +1443,38 @@ export const App: React.FC = () => {
       return;
     }
 
-    // 3. Create new connection
-    const isHandle = rawTarget.startsWith('@');
-    const partnerCode =
-      cleanDigits.length === 6
-        ? cleanDigits
-        : isHandle
-        ? handleToPin(rawTarget.slice(1)).slice(0, 6)
-        : '840291';
-    const partnerHandle = isHandle ? rawTarget : `@user_${partnerCode.slice(0, 4)}`;
-    const partnerName =
-      customName || (isHandle ? `${rawTarget.slice(1)} ✨` : `Partner #${partnerCode.slice(0, 3)}`);
-
-    const newId = 'c_' + Date.now();
-    const newContact: ContactItem = {
-      id: newId,
-      name: partnerName,
-      handle: partnerHandle,
-      code: partnerCode,
-      avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
-      color: 'from-emerald-500 to-teal-500',
-      online: true,
-      unread: 0,
-      time: 'Now',
-    };
-
-    audio.play('receive');
-    setContacts((prev) => [newContact, ...prev]);
-    setChats((prev) => ({
-      ...prev,
-      [newId]: [
-        {
-          id: 'w_' + Date.now(),
-          sender: 'them',
-          type: 'text',
-          text: `Encrypted stealth tunnel established via code ${partnerCode}. Zero traces saved. 🔒✨`,
-          timerMode: '30s',
-          totalSeconds: 30,
-          remainingSeconds: 30,
-          seen: true,
-          shielded: false,
-          reactions: ['⚡'],
-          time: 'Just now',
-          disintegrating: false,
-        },
-      ],
-    }));
-    setShowQrPinPopover(false);
-    setShowConnectSheet(false);
-    setActiveContactId(newId);
-    setScreen('chat');
-  };
-
-  // Connect New Friend by 6-Digit Code or @handle
-  const handleConnectFriend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!connectCodeInput.trim()) return;
-    const raw = connectCodeInput.trim();
-    const cleanDigits = raw.replace(/\D/g, '');
-    const cleanHandle = raw.toLowerCase().replace(/^@/, '').trim();
-
-    // 1. Check if it matches any pending request!
-    const matchedReq = pendingRequests.find(
-      (r) =>
-        r.code.replace(/\D/g, '') === cleanDigits ||
-        r.handle.toLowerCase().replace(/^@/, '') === cleanHandle ||
-        r.name.toLowerCase().includes(raw.toLowerCase())
-    );
-    if (matchedReq) {
-      handleAcceptRequest(matchedReq);
-      setConnectCodeInput('');
-      setShowConnectSheet(false);
-      return;
-    }
-
-    // 2. Check if already connected in contacts!
-    const existing = contacts.find(
-      (c) =>
-        c.code.replace(/\D/g, '') === cleanDigits ||
-        c.handle.toLowerCase().replace(/^@/, '') === cleanHandle
-    );
-    if (existing) {
-      setActiveContactId(existing.id);
-      setScreen('chat');
-      setConnectCodeInput('');
-      setShowConnectSheet(false);
-      audio.play('tap');
-      return;
-    }
-
     // 3. Search Supabase for real user profile
-    let partnerName = '';
+    let partnerName = customName || '';
     let partnerHandle = '';
-    let partnerCode = '';
+    let partnerCode = cleanDigits.slice(0, 6);
     let partnerAvatar =
       'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
 
     try {
-      const found = await NetworkService.findProfileByPin(raw);
+      const found = await NetworkService.findProfileByPin(rawTarget);
       if (found) {
         partnerName = found.displayName || found.handle;
         partnerHandle = `@${found.handle}`;
-        partnerCode = handleToPin(found.handle).slice(0, 6);
+        partnerCode = found.pin || handleToPin(found.handle).slice(0, 6);
       }
-    } catch {
-      // offline fallback
-    }
+    } catch {}
 
-    // Fallback if offline / demo code
     if (!partnerHandle) {
-      const isHandle = raw.startsWith('@');
+      const isHandle = rawTarget.startsWith('@');
       if (isHandle) {
-        partnerHandle = raw;
-        partnerName = `${raw.slice(1)} ✨`;
-        partnerCode = handleToPin(raw.slice(1)).slice(0, 6);
+        partnerHandle = rawTarget;
+        partnerName = partnerName || `${rawTarget.slice(1)} ✨`;
+        partnerCode = handleToPin(rawTarget.slice(1)).slice(0, 6);
       } else {
-        const pCode =
-          cleanDigits.length === 6
-            ? cleanDigits
-            : cleanDigits.padEnd(6, '0').slice(0, 6) || '840291';
+        const pCode = cleanDigits.length === 6 ? cleanDigits : '768049';
         partnerCode = pCode;
         partnerHandle = `@user_${partnerCode.slice(0, 4)}`;
-        partnerName = `Partner #${partnerCode.slice(0, 3)}`;
+        partnerName = partnerName || `Partner #${partnerCode.slice(0, 3)}`;
       }
     }
 
-    const newId = 'c_' + Date.now();
+    const cleanPHandle = partnerHandle.replace(/^@/, '').toLowerCase();
+    const newId = 'c_' + cleanPHandle;
     const newContact: ContactItem = {
       id: newId,
       name: partnerName,
@@ -1122,29 +1488,80 @@ export const App: React.FC = () => {
     };
 
     audio.play('receive');
-    setContacts((prev) => [newContact, ...prev]);
-    setChats((prev) => ({
-      ...prev,
-      [newId]: [
-        {
-          id: 'w_' + Date.now(),
-          sender: 'them',
-          type: 'text',
-          text: `Connected via zero-login code ${partnerCode}. No phone or email shared! 🔒✨`,
-          timerMode: '30s',
-          totalSeconds: 30,
-          remainingSeconds: 30,
-          seen: true,
-          shielded: false,
-          time: 'Just now',
-          disintegrating: false,
-        },
-      ],
-    }));
-    setConnectCodeInput('');
+    setContacts((prev) => [newContact, ...prev.filter((c) => c.id !== newId)]);
+    setShowQrPinPopover(false);
     setShowConnectSheet(false);
     setActiveContactId(newId);
     setScreen('chat');
+
+    // Notify partner over Supabase Realtime
+    const myClean = myHandle.replace(/^@/, '').toLowerCase();
+    const myFullProfile: UserProfile = {
+      id: 'usr_' + myClean,
+      handle: myClean,
+      displayName: myHandle.replace(/^@/, ''),
+      avatarId: 1,
+      vibe: '⚡ Stealth Tunnel',
+      isAvailable: true,
+      country: 'India',
+      state: '',
+      city: '',
+      lastActive: Date.now(),
+      pin: myCode.replace(/\D/g, ''),
+    };
+    NetworkService.sendPeerConnectedNotice(cleanPHandle, myFullProfile).catch(() => {});
+  };
+
+  // Send real-time Handshake Request
+  const handleSendHandshake = async (targetProf: UserProfile) => {
+    audio.play('tap');
+    const myClean = myHandle.replace(/^@/, '').toLowerCase();
+    const myFullProfile: UserProfile = {
+      id: 'usr_' + myClean,
+      handle: myClean,
+      displayName: myHandle.replace(/^@/, ''),
+      avatarId: 1,
+      vibe: '⚡ Stealth Tunnel',
+      isAvailable: true,
+      country: 'India',
+      state: '',
+      city: '',
+      lastActive: Date.now(),
+      pin: myCode.replace(/\D/g, ''),
+    };
+    await NetworkService.sendHandshakeRequest(targetProf.handle, myFullProfile);
+    setHandshakeSentToast(true);
+    setInAppBanner({
+      name: targetProf.displayName || targetProf.handle,
+      code: handleToPin(targetProf.handle).slice(0, 6),
+      text: `Handshake request sent to ${targetProf.displayName || targetProf.handle}! Waiting for them to accept.`,
+    });
+    setShowConnectSheet(false);
+    setConnectCodeInput('');
+    setSearchTargetProfile(null);
+    setTimeout(() => {
+      setHandshakeSentToast(false);
+      setInAppBanner(null);
+    }, 4500);
+  };
+
+  // Connect New Friend by 6-Digit Code or @handle
+  const handleConnectFriend = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!connectCodeInput.trim()) return;
+
+    if (searchTargetProfile) {
+      await connectDirectly(searchTargetProfile.handle, searchTargetProfile.displayName);
+      setConnectCodeInput('');
+      setShowConnectSheet(false);
+      setSearchTargetProfile(null);
+      return;
+    }
+
+    await connectDirectly(connectCodeInput.trim());
+    setConnectCodeInput('');
+    setShowConnectSheet(false);
+    setSearchTargetProfile(null);
   };
 
   // App Lock Keypad Handler (Supports Real PIN 2580 & Decoy PIN 0000)
@@ -1332,7 +1749,7 @@ export const App: React.FC = () => {
                       const clean = val.replace(/^@/, '').trim();
                       if (clean) {
                         const pin = handleToPin(clean);
-                        setMyCode(`${pin.slice(0, 3)}-${pin.slice(3, 6)}`);
+                        setMyCode(pin.slice(0, 6));
                       }
                     }}
                     className="w-full bg-transparent text-xs font-semibold text-white focus:outline-none mt-0.5"
@@ -1514,6 +1931,15 @@ export const App: React.FC = () => {
                   <Ghost className="w-4 h-4" />
                 </button>
 
+                {/* Direct Camera QR Scanner Button */}
+                <button
+                  onClick={() => setShowCameraModal(true)}
+                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-[#00F5A0] hover:text-white transition-all cursor-pointer"
+                  title="Scan Friend's QR Code"
+                >
+                  <Camera className="w-4 h-4" />
+                </button>
+
                 {/* Connect Friend Button */}
                 <button
                   onClick={() => setShowConnectSheet(!showConnectSheet)}
@@ -1525,38 +1951,122 @@ export const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Quick Connect Slide-Down Bar */}
+            {/* Quick Connect Slide-Down Bar with Live Peer Lookup */}
             {showConnectSheet && (
-              <form
-                onSubmit={handleConnectFriend}
-                className="mx-5 mb-3 p-3 rounded-2xl bg-zinc-900/90 border border-[#00F5A0]/30 flex items-center gap-2"
-              >
-                <input
-                  type="text"
-                  value={connectCodeInput}
-                  onChange={(e) => setConnectCodeInput(e.target.value)}
-                  placeholder="Enter 6-digit code (e.g. 742109) or @handle"
-                  className="flex-1 bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowConnectSheet(false);
-                    setShowCameraModal(true);
-                  }}
-                  className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#00F5A0] cursor-pointer"
-                  title="Scan QR with Camera"
+              <div className="mx-5 mb-3 p-3.5 rounded-2xl bg-zinc-900/95 border border-[#00F5A0]/40 shadow-xl shadow-black/60 space-y-3">
+                <form
+                  onSubmit={handleConnectFriend}
+                  className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2"
                 >
-                  <Camera className="w-4 h-4" />
-                </button>
-                <button
-                  type="submit"
-                  className="px-3 py-1.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-black text-xs cursor-pointer"
-                >
-                  Connect
-                </button>
-              </form>
+                  <KeyRound className="w-4 h-4 text-[#00F5A0] shrink-0" />
+                  <input
+                    type="text"
+                    value={connectCodeInput}
+                    onChange={(e) => setConnectCodeInput(e.target.value)}
+                    placeholder="Enter 6-digit PIN (e.g. 768049) or @handle"
+                    className="flex-1 bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowConnectSheet(false);
+                      setShowCameraModal(true);
+                    }}
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#00F5A0] cursor-pointer"
+                    title="Scan QR with Camera"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowConnectSheet(false);
+                      setConnectCodeInput('');
+                      setSearchTargetProfile(null);
+                      setTargetSearchError(null);
+                    }}
+                    className="p-1 text-zinc-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </form>
+
+                {/* Searching Indicator */}
+                {isSearchingTarget && (
+                  <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-emerald-400">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Searching stealth network for peer...</span>
+                  </div>
+                )}
+
+                {/* Found Verified User Card */}
+                {searchTargetProfile && (
+                  <div className="p-3 rounded-xl bg-emerald-950/30 border border-[#00F5A0]/40 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img
+                          src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
+                          alt={searchTargetProfile.displayName}
+                          className="w-9 h-9 rounded-full object-cover border border-[#00F5A0]/60 shrink-0"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-bold text-white truncate">
+                              {searchTargetProfile.displayName || searchTargetProfile.handle}
+                            </span>
+                            <span className="text-[9px] font-mono text-[#00F5A0] bg-[#00F5A0]/15 px-1.5 py-0.5 rounded font-black">
+                              PIN #{searchTargetProfile.pin || handleToPin(searchTargetProfile.handle).slice(0, 6)}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-zinc-400 truncate">
+                            @{searchTargetProfile.handle} • <span className="text-emerald-400">Verified Peer 🟢</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          connectDirectly(searchTargetProfile.handle, searchTargetProfile.displayName);
+                          setConnectCodeInput('');
+                          setShowConnectSheet(false);
+                          setSearchTargetProfile(null);
+                        }}
+                        className="py-1.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#00F5A0]/20"
+                      >
+                        <Zap className="w-3.5 h-3.5" />
+                        <span>Direct Chat</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSendHandshake(searchTargetProfile)}
+                        className="py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-white/10"
+                      >
+                        <UserPlus className="w-3.5 h-3.5 text-[#00F5A0]" />
+                        <span>Send Request</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Error / Not Found Status */}
+                {targetSearchError && !searchTargetProfile && (
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2">
+                    <p className="text-[11px] text-amber-300">{targetSearchError}</p>
+                    <button
+                      type="button"
+                      onClick={() => handleConnectFriend()}
+                      className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-zinc-950 text-[10px] font-bold shrink-0 cursor-pointer"
+                    >
+                      Connect anyway
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Search Bar */}
@@ -1707,6 +2217,38 @@ export const App: React.FC = () => {
                     </button>
                   );
                 })}
+
+              {/* Empty State when no active contacts */}
+              {activeContactsList.length === 0 && (
+                <div className="py-16 px-4 text-center flex flex-col items-center justify-center">
+                  <div className="w-16 h-16 rounded-3xl bg-zinc-900/90 border border-white/10 flex items-center justify-center text-[#00F5A0] mb-4 shadow-[0_0_30px_rgba(0,245,160,0.15)]">
+                    <Lock className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-base font-bold text-white mb-1.5">No Active Ciphers</h3>
+                  <p className="text-xs text-zinc-400 max-w-xs mb-6 leading-relaxed">
+                    All messages vanish automatically on read. Connect with a partner using their 6-digit PIN or scan their QR.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2.5">
+                    <button
+                      onClick={() => setShowCameraModal(true)}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-bold text-xs transition-all shadow-lg shadow-[#00F5A0]/25 cursor-pointer active:scale-95"
+                    >
+                      <Camera className="w-4 h-4" />
+                      <span>Scan Friend's QR</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setPopoverTab('qr');
+                        setShowQrPinPopover(true);
+                      }}
+                      className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-zinc-900 hover:bg-zinc-800 border border-white/15 text-white font-semibold text-xs transition-all cursor-pointer active:scale-95"
+                    >
+                      <QrCode className="w-4 h-4 text-[#00F5A0]" />
+                      <span>My 6-Digit Code</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1763,25 +2305,19 @@ export const App: React.FC = () => {
                 </div>
               </div>
 
-              {/* Right Header Icons: Screenshot Test, QR/PIN Modal & Panic Burn */}
-              <div className="flex items-center gap-1">
+              {/* Right Header Icons: Clean Timer & Panic Burn */}
+              <div className="flex items-center gap-1.5">
                 <button
-                  onClick={triggerScreenshotBlockedAlert}
-                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-amber-300 transition-all cursor-pointer"
-                  title="Simulate Screenshot Attempt Blocked"
+                  onClick={() => setShowTimerMenu(!showTimerMenu)}
+                  className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0 transition-all cursor-pointer ${
+                    timerMode === 'burn'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                      : 'bg-zinc-900 hover:bg-zinc-800 text-[#00F5A0] border border-white/10'
+                  }`}
+                  title="Disappearing Timer"
                 >
-                  <ShieldAlert className="w-4 h-4" />
-                </button>
-
-                <button
-                  onClick={() => {
-                    setPopoverTab('qr');
-                    setShowQrPinPopover(true);
-                  }}
-                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-300 transition-all cursor-pointer"
-                  title="My Code, QR & 4-Digit PIN"
-                >
-                  <QrCode className="w-4 h-4" />
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{timerMode === 'burn' ? 'Burn' : timerMode}</span>
                 </button>
 
                 <button
@@ -1793,6 +2329,14 @@ export const App: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* Realtime Screenshot Detection Warning Banner */}
+            {screenshotToast && (
+              <div className="absolute top-14 left-4 right-4 z-40 p-2.5 rounded-2xl bg-rose-950/95 border border-rose-500/50 backdrop-blur-2xl text-rose-200 text-xs font-mono text-center shadow-2xl flex items-center justify-center gap-2 animate-in fade-in slide-in-from-top-2">
+                <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{screenshotToast}</span>
+              </div>
+            )}
 
             {/* Sleek Panic Confirmation Popover */}
             {showPanicPopover && (
@@ -2179,54 +2723,6 @@ export const App: React.FC = () => {
                 NEXT-LEVEL FLOATING LIQUID-GLASS AURORA COMPOSER
                ========================================================= */}
             <div className="p-3 pt-1 bg-gradient-to-t from-[#09090B] via-[#09090B] to-transparent relative z-20">
-              {/* 1. EPHEMERAL SECRET PHOTO PICKER DRAWER */}
-              {showPhotoPicker && (
-                <div className="mb-2 p-3 rounded-3xl bg-zinc-900/95 border border-white/15 backdrop-blur-2xl shadow-2xl space-y-2.5">
-                  <div className="flex items-center justify-between text-xs font-bold text-white">
-                    <span className="flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5 text-[#00F5A0]" />
-                      <span>Send Ephemeral Secret Photo (Zero Gallery Trace)</span>
-                    </span>
-                    <button
-                      onClick={() => setShowPhotoPicker(false)}
-                      className="text-zinc-400 hover:text-white cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    {EPHEMERAL_PHOTO_PRESETS.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => handleSendPhoto(preset)}
-                        className="group relative h-20 rounded-2xl overflow-hidden border border-white/15 text-left cursor-pointer"
-                      >
-                        <img
-                          src={preset.previewUrl}
-                          alt={preset.title}
-                          className="w-full h-full object-cover group-hover:scale-110 transition-transform"
-                        />
-                        <div className="absolute inset-0 bg-black/50 flex flex-col justify-end p-1.5">
-                          <span className="text-[9px] font-bold text-white leading-tight">
-                            {preset.title}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  <input
-                    type="text"
-                    value={customPhotoCaption}
-                    onChange={(e) => setCustomPhotoCaption(e.target.value)}
-                    placeholder="Add optional secret caption..."
-                    className="w-full bg-zinc-950 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none"
-                  />
-                </div>
-              )}
-
               {/* 2. REPLY-TO-MESSAGE PREVIEW BAR */}
               {replyingTo && (
                 <div className="mb-1.5 px-3 py-1.5 rounded-2xl bg-zinc-900/95 border border-[#00F5A0]/30 flex items-center justify-between text-xs">
@@ -2424,21 +2920,24 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Secret Photo & Mic Buttons (when input is empty) */}
+                  {/* Secret Photo from Gallery & Voice Recording Buttons */}
                   {!messageText.trim() && !isRecording && (
                     <>
+                      <input
+                        type="file"
+                        ref={galleryInputRef}
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleGalleryPhotoSelect}
+                      />
                       <button
                         type="button"
                         onClick={() => {
-                          setShowPhotoPicker(!showPhotoPicker);
+                          galleryInputRef.current?.click();
                           audio.play('tap');
                         }}
-                        className={`p-2 rounded-full transition-colors shrink-0 cursor-pointer ${
-                          showPhotoPicker
-                            ? 'bg-[#00F5A0]/20 text-[#00F5A0]'
-                            : 'text-zinc-400 hover:text-zinc-200'
-                        }`}
-                        title="Open Secret Ephemeral Photo Picker"
+                        className="p-2 rounded-full text-zinc-400 hover:text-[#00F5A0] transition-colors shrink-0 cursor-pointer"
+                        title="Send Photo from Gallery"
                       >
                         <ImageIcon className="w-4 h-4" />
                       </button>
