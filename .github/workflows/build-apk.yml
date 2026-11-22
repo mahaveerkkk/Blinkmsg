@@ -45,6 +45,11 @@ jobs:
       - name: Make Gradlew Executable
         run: chmod +x android/gradlew
 
+      - name: Ensure Android Platform 36 is Installed
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses 2>/dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-36" 2>/dev/null || true
+
       - name: Build Play Store AAB Bundle
         run: |
           cd android
