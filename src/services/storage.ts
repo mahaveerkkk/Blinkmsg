@@ -62,6 +62,7 @@ export class StorageService {
       state: 'Delhi',
       city: 'New Delhi',
       lastActive: Date.now(),
+      pin: StorageService.getMyRoomCode(),
     };
 
     StorageService.saveProfile(profile);
@@ -130,9 +131,9 @@ export class StorageService {
       if (userHandle) {
         localStorage.removeItem(StorageService.getRoomsKey(userHandle));
       }
-      // Purge any stored room lists across handles
+      // Purge all stored data across keys
       Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith('blinkmsg_')) {
+        if (key.startsWith('blinkmsg_') || key.startsWith('blink_')) {
           localStorage.removeItem(key);
         }
       });

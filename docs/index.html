@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BlinkMsg — Zero-Login Stealth Messenger</title>
+  <meta name="description" content="Zero-login stealth messenger with hardware AES-256-GCM encryption, ephemeral burning timers, and total anonymity.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07080B;
+      --card: #0F1117;
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent: #00F5A0;
+      --accent-glow: rgba(0, 245, 160, 0.25);
+      --text: #F4F4F5;
+      --muted: #A1A1AA;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.6;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+    header {
+      padding: 28px 0;
+      border-bottom: 1px solid var(--card-border);
+      position: sticky;
+      top: 0;
+      background: rgba(7, 8, 11, 0.85);
+      backdrop-filter: blur(16px);
+      z-index: 50;
+    }
+    .nav {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: #fff;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: -0.5px;
+    }
+    .logo-badge {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #00F5A0, #00A3FF);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+    .logo-badge svg {
+      width: 18px;
+      height: 18px;
+      fill: #000;
+    }
+    .nav-links {
+      display: flex;
+      gap: 20px;
+    }
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover {
+      color: var(--accent);
+    }
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+      position: relative;
+    }
+    .hero-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 100px;
+      background: rgba(0, 245, 160, 0.08);
+      border: 1px solid rgba(0, 245, 160, 0.25);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      margin-bottom: 24px;
+    }
+    .hero h1 {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1.15;
+      margin-bottom: 20px;
+      background: linear-gradient(180deg, #FFFFFF 40%, #A1A1AA 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 18px;
+      color: var(--muted);
+      max-width: 600px;
+      margin: 0 auto 36px;
+    }
+    .cta-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 14px 28px;
+      border-radius: 14px;
+      text-decoration: none;
+      box-shadow: 0 0 25px var(--accent-glow);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .cta-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 35px rgba(0, 245, 160, 0.4);
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px;
+      margin: 60px 0;
+    }
+    .feature-card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 28px;
+      transition: border-color 0.2s;
+    }
+    .feature-card:hover {
+      border-color: rgba(0, 245, 160, 0.3);
+    }
+    .feature-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: rgba(0, 245, 160, 0.1);
+      border: 1px solid rgba(0, 245, 160, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      margin-bottom: 18px;
+    }
+    .feature-card h3 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    .feature-card p {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .legal-section {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 48px;
+      margin: 60px 0;
+    }
+    .legal-section h2 {
+      font-size: 30px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 12px;
+      color: #fff;
+    }
+    .legal-date {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 32px;
+      display: block;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .legal-section h3 {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent);
+      margin: 28px 0 10px;
+    }
+    .legal-section p, .legal-section li {
+      font-size: 15px;
+      color: #D4D4D8;
+      line-height: 1.7;
+      margin-bottom: 14px;
+    }
+    .legal-section ul {
+      padding-left: 20px;
+      margin-bottom: 16px;
+    }
+    footer {
+      border-top: 1px solid var(--card-border);
+      padding: 40px 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 34px; }
+      .legal-section { padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container nav">
+      <a href="#" class="logo">
+        <div class="logo-badge">
+          <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        </div>
+        <span>BlinkMsg</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#privacy">Privacy Policy</a>
+        <a href="#terms">Terms</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div class="hero-pill">⚡ ZERO-LOGIN STEALTH MESSENGER</div>
+      <h1>True Ephemeral Privacy.<br>No Traces Left Behind.</h1>
+      <p>Hardware AES-256-GCM encrypted chats that auto-destruct on read. No phone numbers, no emails, no digital footprint.</p>
+      <a href="#privacy" class="cta-btn">Read Privacy Policy</a>
+    </section>
+
+    <section id="features" class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3>Zero Registration</h3>
+        <p>No phone numbers, email addresses, or social accounts required. Generate a disposable 6-digit PIN or scan a QR code to begin.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔥</div>
+        <h3>Self-Burning Timers</h3>
+        <p>Messages, listen-once voice notes, and photos vaporize automatically upon reading or after your configured countdown timer.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔐</div>
+        <h3>Hardware AES-256</h3>
+        <p>End-to-end hardware encryption keys derived on-device. Servers only relay blinded ciphertext and never hold private keys.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🎭</div>
+        <h3>Decoy Disguise PIN</h3>
+        <p>A secondary safety PIN triggers decoy chats instantly when unlocked under duress, hiding your real private conversations.</p>
+      </div>
+    </section>
+
+    <!-- PRIVACY POLICY (GOOGLE PLAY COMPLIANT) -->
+    <section id="privacy" class="legal-section">
+      <h2>Privacy Policy</h2>
+      <span class="legal-date">Last Updated: November 22, 2026</span>
+
+      <p>This Privacy Policy explains how <strong>BlinkMsg</strong> ("we", "our", or "the app") handles user data. Our core philosophy is simple: <strong>We do not collect, store, sell, or monetize any of your personal data.</strong> BlinkMsg is engineered specifically to eliminate data retention entirely.</p>
+
+      <h3>1. Information We Do NOT Collect</h3>
+      <ul>
+        <li><strong>No Personal Identifiers:</strong> We do not ask for or collect your real name, phone number, email address, contacts, or social media links.</li>
+        <li><strong>No Identity Profiles:</strong> User profiles are stored locally on your device in volatile sandbox storage and can be completely purged at any time.</li>
+        <li><strong>No Message Logs:</strong> Messages are ephemeral. Once delivered and read (or expired via timer), they are permanently incinerated from memory.</li>
+      </ul>
+
+      <h3>2. Device Permissions and How They Are Used</h3>
+      <p>BlinkMsg requests minimal device permissions strictly necessary for user-initiated cryptographic features:</p>
+      <ul>
+        <li><strong>Camera Permission (android.permission.CAMERA):</strong> Used exclusively within the app to scan BlinkMsg QR codes for adding friends or joining rooms. The camera video feed is processed 100% locally on your device; no video or image frames are ever transmitted, recorded, or stored remotely.</li>
+        <li><strong>Microphone Permission (android.permission.RECORD_AUDIO):</strong> Used exclusively when you press and hold the voice recorder button to record listen-once ephemeral audio notes. Voice notes are encrypted on your device with AES-256-GCM before transport and are permanently vaporized upon listening.</li>
+        <li><strong>Vibration (android.permission.VIBRATE):</strong> Used strictly for tactile sensory feedback upon sending, receiving, or burning messages.</li>
+      </ul>
+
+      <h3>3. End-to-End Encryption & Security</h3>
+      <p>All communication channels in BlinkMsg utilize client-side <strong>AES-256-GCM</strong> hardware cryptographic primitives. Room encryption keys are negotiated directly between peer devices and are never transmitted to or readable by any relay server.</p>
+
+      <h3>4. Data Retention & One-Tap Emergency Wipe</h3>
+      <p>BlinkMsg stores messages strictly in temporary, encrypted local storage. Users can trigger an instant <strong>"Emergency Wipe All Data"</strong> button in Settings at any time, which irrevocably purges all encryption keys, contacts, cached media, and conversation history from the device.</p>
+
+      <h3>5. Third-Party Services</h3>
+      <p>The app uses encrypted websocket relay infrastructure strictly to route blinded ciphertext packets between active peers. No analytics trackers, behavioral profiling SDKs, or third-party advertising frameworks are integrated into BlinkMsg.</p>
+
+      <h3>6. Children's Privacy</h3>
+      <p>BlinkMsg does not knowingly collect or solicit personal information from anyone under the age of 13. Since no personal data is collected from any user, no children's data is retained.</p>
+
+      <h3>7. Developer Contact</h3>
+      <p>If you have any questions or concerns regarding this Privacy Policy or the security architecture of BlinkMsg, you can contact the development team at:<br>
+      <strong>Email:</strong> mahaveerkkk.dev@gmail.com</p>
+    </section>
+
+    <!-- TERMS OF SERVICE -->
+    <section id="terms" class="legal-section">
+      <h2>Terms of Service</h2>
+      <span class="legal-date">Last Updated: November 22, 2026</span>
+      <p>By downloading or using BlinkMsg, you agree to these Terms. BlinkMsg is provided "as is" without warranties of any kind. You agree not to use the application for any unlawful purposes or harmful transmissions. Because BlinkMsg employs client-side encryption and does not retain keys, lost PINs or wiped sessions cannot be recovered by the developers.</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>&copy; 2026 BlinkMsg. Built for zero-trace privacy. All rights reserved.</p>
+    </div>
+  </footer>
+</body>
+</html>

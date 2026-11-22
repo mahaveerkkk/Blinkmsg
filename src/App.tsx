@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ChevronLeft,
   QrCode,
@@ -33,11 +33,21 @@ import {
   Wand2,
   Trash2,
   Settings,
+  MoreVertical,
+  Ban,
+  UserMinus,
 } from 'lucide-react';
 import { StorageService } from './services/storage';
 import { NetworkService, supabase, handleToPin } from './services/network';
+import { CryptoService } from './services/crypto';
 import { QRScannerModal } from './components/QRScannerModal';
-import { UserProfile } from './types';
+import { BottomNav } from './components/BottomNav';
+import { SecretVaultView } from './components/SecretVaultView';
+import { ProfileView } from './components/ProfileView';
+import { Avatar } from './components/Avatar';
+import { UserProfile, ActiveTab, ChatRoom } from './types';
+import { QRCodeSVG } from 'qrcode.react';
+import { App as CapApp } from '@capacitor/app';
 
 // ==========================================
 // SUBTLE TACTILE AUDIO ENGINE
@@ -59,6 +69,19 @@ class TactileSound {
   play(type: 'send' | 'receive' | 'smoke' | 'tap' | 'alert') {
     if (this.muted) return;
     try {
+      // Hardware tactile haptic feedback on real devices
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          if (type === 'send') navigator.vibrate(12);
+          else if (type === 'receive') navigator.vibrate([15, 30, 20]);
+          else if (type === 'smoke') navigator.vibrate([25, 40, 35]);
+          else if (type === 'tap') navigator.vibrate(8);
+          else if (type === 'alert') navigator.vibrate([60, 40, 60]);
+        } catch {
+          // Ignore if vibration is restricted by user agent
+        }
+      }
+
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
@@ -148,6 +171,7 @@ interface ContactItem {
   handle: string;
   code: string;
   avatar: string;
+  avatarId?: number;
   color?: string;
   online: boolean;
   unread: number;
@@ -173,6 +197,7 @@ interface MessageItem {
   time: string;
   disintegrating?: boolean;
   everRevealed?: boolean;
+  status?: 'sent' | 'delivered' | 'read';
 }
 
 interface HandshakeRequest {
@@ -243,9 +268,11 @@ const DECOY_CHATS: Record<string, MessageItem[]> = {
   ],
 };
 
-const INITIAL_CONTACTS: ContactItem[] = [];
+const DEFAULT_CONTACTS: ContactItem[] = [];
+const DEFAULT_CHATS: Record<string, MessageItem[]> = {};
 
-const INITIAL_CHATS: Record<string, MessageItem[]> = {};
+const INITIAL_CONTACTS: ContactItem[] = DEFAULT_CONTACTS;
+const INITIAL_CHATS: Record<string, MessageItem[]> = DEFAULT_CHATS;
 
 export const App: React.FC = () => {
   // Navigation: 'onboarding' | 'list' | 'chat'
@@ -253,28 +280,35 @@ export const App: React.FC = () => {
     return StorageService.getProfile() ? 'list' : 'onboarding';
   });
 
+  // Active Tab for Main Navigation: 'chats' (Messages) | 'vault' (Connect) | 'profile' (Settings)
+  const [activeTab, setActiveTab] = useState<ActiveTab>('chats');
+
   const [activeContactId, setActiveContactId] = useState<string>(() => {
-    return localStorage.getItem('blink_active_contact_id') || '';
+    const saved = localStorage.getItem('blink_active_contact_id');
+    return (saved && saved !== 'c1') ? saved : '';
   });
   const [contacts, setContacts] = useState<ContactItem[]>(() => {
     const saved = localStorage.getItem('blink_contacts_list');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Filter out any legacy dummy mock contacts
+          return parsed.filter((c: any) => c && c.id !== 'c1' && c.id !== 'c2' && c.id !== 'c3');
+        }
       } catch {}
     }
-    return [];
+    return DEFAULT_CONTACTS;
   });
   const [chats, setChats] = useState<Record<string, MessageItem[]>>(() => {
     const saved = localStorage.getItem('blink_chat_history');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object') return parsed;
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) return parsed;
       } catch {}
     }
-    return {};
+    return DEFAULT_CHATS;
   });
   const [pendingRequests, setPendingRequests] = useState<HandshakeRequest[]>(() => {
     const saved = localStorage.getItem('blink_pending_requests');
@@ -291,10 +325,17 @@ export const App: React.FC = () => {
   // User Identity & Privacy Controls
   const [myCode, setMyCode] = useState<string>(() => {
     const saved = localStorage.getItem('blink_user_code');
-    if (saved) return saved.replace(/\D/g, '');
+    if (saved && /^\d{6}$/.test(saved.trim())) {
+      return saved.trim();
+    }
     const p = StorageService.getProfile();
-    if (p) return handleToPin(p.handle).slice(0, 6);
-    return '768049';
+    if (p?.pin && /^\d{6}$/.test(p.pin.trim())) {
+      localStorage.setItem('blink_user_code', p.pin.trim());
+      return p.pin.trim();
+    }
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    localStorage.setItem('blink_user_code', newCode);
+    return newCode;
   });
   const [myHandle, setMyHandle] = useState<string>(() => {
     const p = StorageService.getProfile();
@@ -307,8 +348,20 @@ export const App: React.FC = () => {
   const [decoyModeActive, setDecoyModeActive] = useState<boolean>(false);
   const [ghostMode, setGhostMode] = useState<boolean>(false);
   const [muted, setMuted] = useState<boolean>(false);
-  const [autoSeenSim, setAutoSeenSim] = useState<boolean>(true);
+  const [autoSeenSim, setAutoSeenSim] = useState<boolean>(false);
   const [screenshotToast, setScreenshotToast] = useState<string | null>(null);
+
+  // Blocked Users & Contact Actions State
+  const [blockedUsers, setBlockedUsers] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('blink_blocked_users');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [actionContact, setActionContact] = useState<ContactItem | null>(null);
+  const [showChatOptions, setShowChatOptions] = useState<boolean>(false);
 
   // Onboarding & Account Restore State
   const [isGeneratingId, setIsGeneratingId] = useState<boolean>(false);
@@ -319,7 +372,7 @@ export const App: React.FC = () => {
 
   // Sleek Popovers & Overlays
   const [showQrPinPopover, setShowQrPinPopover] = useState<boolean>(false);
-  const [popoverTab, setPopoverTab] = useState<'qr' | 'pin' | 'scan'>('qr');
+  const [popoverTab, setPopoverTab] = useState<'qr' | 'pin' | 'connect'>('qr');
   const [copied, setCopied] = useState<boolean>(false);
   const [pinSavedToast, setPinSavedToast] = useState<boolean>(false);
   const [showConnectSheet, setShowConnectSheet] = useState<boolean>(false);
@@ -330,10 +383,28 @@ export const App: React.FC = () => {
   const [handshakeSentToast, setHandshakeSentToast] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showCameraModal, setShowCameraModal] = useState<boolean>(false);
-  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
 
   // Disclaimer Popup on Regenerating Code
   const [showRegenerateDisclaimer, setShowRegenerateDisclaimer] = useState<boolean>(false);
+
+  // Full User Profile memoized for Connect & Vault features
+  const myFullProfile: UserProfile = useMemo(() => {
+    const myClean = myHandle.replace(/^@/, '').toLowerCase();
+    const stored = StorageService.getProfile();
+    return {
+      id: stored?.id || ('usr_' + myClean),
+      handle: myClean,
+      displayName: stored?.displayName || myHandle.replace(/^@/, ''),
+      avatarId: stored?.avatarId || 1,
+      vibe: stored?.vibe || '⚡ Stealth Tunnel',
+      isAvailable: stored?.isAvailable ?? true,
+      country: stored?.country || '',
+      state: stored?.state || '',
+      city: stored?.city || '',
+      lastActive: Date.now(),
+      pin: myCode.replace(/\D/g, '') || handleToPin(myClean),
+    };
+  }, [myHandle, myCode]);
 
   // Panic Burn Popover State
   const [showPanicPopover, setShowPanicPopover] = useState<boolean>(false);
@@ -371,7 +442,18 @@ export const App: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const sendHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const activeAudioPlayerRef = useRef<HTMLAudioElement | null>(null);
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  const activeContactIdRef = useRef(activeContactId);
+  activeContactIdRef.current = activeContactId;
+  const decoyModeActiveRef = useRef(decoyModeActive);
+  decoyModeActiveRef.current = decoyModeActive;
 
   const activeContactsList = decoyModeActive ? DECOY_CONTACTS : contacts;
   const activeChatsMap = decoyModeActive ? DECOY_CHATS : chats;
@@ -400,6 +482,43 @@ export const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('blink_recovery_pin', recoveryPin);
   }, [recoveryPin]);
+
+  useEffect(() => {
+    localStorage.setItem('blink_blocked_users', JSON.stringify(blockedUsers));
+  }, [blockedUsers]);
+
+  const handleToggleBlock = (targetHandle: string) => {
+    const clean = targetHandle.replace(/^@/, '').toLowerCase().trim();
+    if (!clean) return;
+    setBlockedUsers((prev) => {
+      const isBlocked = prev.includes(clean);
+      const next = isBlocked ? prev.filter((h) => h !== clean) : [...prev, clean];
+      audio.play(isBlocked ? 'receive' : 'alert');
+      return next;
+    });
+  };
+
+  const handleClearChatHistory = (contactId: string) => {
+    audio.play('smoke');
+    setChats((prev) => ({
+      ...prev,
+      [contactId]: [],
+    }));
+  };
+
+  const handleRemoveContact = (contactId: string) => {
+    audio.play('smoke');
+    setContacts((prev) => prev.filter((c) => c.id !== contactId));
+    setChats((prev) => {
+      const next = { ...prev };
+      delete next[contactId];
+      return next;
+    });
+    if (activeContactId === contactId) {
+      setScreen('list');
+      setActiveContactId('');
+    }
+  };
 
   useEffect(() => {
     if (activeContactId) {
@@ -487,7 +606,7 @@ export const App: React.FC = () => {
     const cleanHandle = myHandle.replace(/^@/, '').toLowerCase().trim();
 
     const unsubscribe = NetworkService.subscribeToInbox(cleanHandle, {
-      onIncomingMessage: (payload: any) => {
+      onIncomingMessage: async (payload: any) => {
         const { message, room } = payload || {};
         if (!message) return;
 
@@ -495,8 +614,12 @@ export const App: React.FC = () => {
         const peerClean = (peerHandleRaw || '').replace(/^@/, '').toLowerCase();
         if (!peerClean || peerClean === cleanHandle) return;
 
+        // Silently drop messages from blocked users
+        if (blockedUsers.includes(peerClean)) return;
+
         const peerDisplayName = room?.peerDisplayName || message.senderDisplayName || peerClean;
         const contactId = 'c_' + peerClean;
+        const isCurrentChat = activeContactIdRef.current === contactId && screenRef.current === 'chat';
 
         // Ensure contact exists in contacts list
         setContacts((prev) => {
@@ -505,7 +628,7 @@ export const App: React.FC = () => {
             ? {
                 ...exists,
                 name: peerDisplayName || exists.name,
-                unread: activeContactId === exists.id && screen === 'chat' ? 0 : (exists.unread || 0) + 1,
+                unread: isCurrentChat ? 0 : (exists.unread || 0) + 1,
                 time: 'Just now',
                 online: true,
               }
@@ -517,30 +640,48 @@ export const App: React.FC = () => {
                 avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
                 color: 'from-emerald-500 to-teal-500',
                 online: true,
-                unread: activeContactId === contactId && screen === 'chat' ? 0 : 1,
+                unread: isCurrentChat ? 0 : 1,
                 time: 'Just now',
               };
           return [updatedContact, ...prev.filter((c) => c.handle.replace(/^@/, '').toLowerCase() !== peerClean)];
         });
 
-        // Add message to chats
+        // Add message to chats with decryption & media support
+        const normRoomId = room?.id || `dm_${[cleanHandle, peerClean].sort().join('__')}`;
         const totalSecs = message.timerSeconds || 30;
         const isBurn = message.isBurnOnRead || false;
-        const isPhoto = Boolean(message.previewUrl || message.ciphertext?.startsWith('data:image'));
-        const isVoice = message.type === 'voice' || message.iv === 'voice';
+        const mediaPayload = message.mediaUrl || message.previewUrl || (message.ciphertext?.startsWith('data:') ? message.ciphertext : undefined);
+        const isPhoto = Boolean(mediaPayload?.startsWith('data:image') || message.type === 'photo');
+        const isVoice = message.type === 'voice' || message.iv === 'voice' || Boolean(mediaPayload?.startsWith('data:audio'));
+
+        let plainText = message.text || '';
+        if (!isPhoto && !isVoice) {
+          if (message.ciphertext && message.iv && message.iv !== 'direct') {
+            try {
+              const roomKey = await CryptoService.deriveKeyFromCode(normRoomId);
+              plainText = await CryptoService.decrypt(message.ciphertext, message.iv, roomKey);
+            } catch {
+              plainText = message.text || message.ciphertext || '';
+            }
+          } else if (message.ciphertext) {
+            plainText = message.ciphertext;
+          }
+        } else {
+          plainText = isPhoto ? '📷 Ephemeral Photo' : (message.text || '🎤 Voice Note');
+        }
 
         const msgItem: MessageItem = {
           id: message.id || 'msg_' + Date.now(),
           sender: 'them',
           type: isPhoto ? 'photo' : (isVoice ? 'voice' : 'text'),
-          text: message.ciphertext || message.text || '',
-          previewUrl: message.previewUrl,
+          text: plainText,
+          previewUrl: mediaPayload,
           caption: message.caption,
           duration: message.duration || '0:04',
           timerMode: isBurn ? 'burn' : (`${totalSecs}s` as any),
           totalSeconds: totalSecs,
           remainingSeconds: totalSecs,
-          seen: activeContactId === contactId && screen === 'chat',
+          seen: isCurrentChat,
           shielded: message.isHoldToReveal ?? true,
           reactions: [],
           time: new Date(message.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -556,17 +697,45 @@ export const App: React.FC = () => {
           };
         });
 
-        audio.play('receive');
+        if (!decoyModeActiveRef.current) {
+          audio.play('receive');
+        }
 
-        // Top alert banner if not actively viewing this chat
-        if (screen !== 'chat' || activeContactId !== contactId) {
+        // Immediately send delivery or read acknowledgement back to sender
+        const ackStatus = isCurrentChat && !msgItem.shielded ? 'read' : 'delivered';
+        NetworkService.broadcastDeliveryAck(normRoomId, msgItem.id, ackStatus, peerClean).catch(() => {});
+
+        // Top alert banner if not actively viewing this chat and NOT in decoy mode
+        if (!decoyModeActiveRef.current && !isCurrentChat) {
           setInAppBanner({
             name: peerDisplayName,
             code: handleToPin(peerClean).slice(0, 6),
-            text: msgItem.text.slice(0, 45),
+            text: isPhoto ? '📷 Sent a secret photo' : (isVoice ? '🎤 Sent a voice note' : plainText.slice(0, 45)),
           });
           setTimeout(() => setInAppBanner(null), 5000);
         }
+      },
+
+      onDeliveryAck: (data: any) => {
+        if (!data?.msgId || !data?.status) return;
+        setChats((prev) => {
+          let changed = false;
+          const next = { ...prev };
+          Object.keys(next).forEach((cId) => {
+            next[cId] = (next[cId] || []).map((m) => {
+              if (data.msgId === 'all' || m.id === data.msgId) {
+                changed = true;
+                return {
+                  ...m,
+                  status: data.status,
+                  seen: data.status === 'read' ? true : m.seen,
+                };
+              }
+              return m;
+            });
+          });
+          return changed ? next : prev;
+        });
       },
 
       onHandshakeRequest: (payload: any) => {
@@ -651,14 +820,16 @@ export const App: React.FC = () => {
     };
   }, [myHandle, screen, activeContactId]);
 
-  // Auto-start countdown on unshielded messages when viewing chat
+  // Auto-start countdown on incoming unshielded messages when viewing chat
   useEffect(() => {
     if (screen === 'chat' && activeContact?.id && activeContact.id !== 'placeholder') {
       setChats((prev) => {
         const list = prev[activeContact.id] || [];
         let changed = false;
         const updated = list.map((m) => {
-          if (!m.seen && !m.shielded) {
+          // ONLY incoming messages from partner ('them') are marked seen upon receiver viewing
+          // Outgoing messages ('me') remain seen: false until receiver sends 'read' ACK
+          if (m.sender === 'them' && !m.seen && !m.shielded) {
             changed = true;
             return { ...m, seen: true };
           }
@@ -672,11 +843,11 @@ export const App: React.FC = () => {
         prev.map((c) => (c.id === activeContact.id ? { ...c, unread: 0 } : c))
       );
 
-      // Broadcast read receipt to partner
+      // Broadcast read receipt directly to partner
       const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
       const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
       const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
-      NetworkService.broadcastDeliveryAck(normRoomId, 'all', 'read').catch(() => {});
+      NetworkService.broadcastDeliveryAck(normRoomId, 'all', 'read', cleanThem).catch(() => {});
     }
   }, [screen, activeContact?.id]);
 
@@ -740,7 +911,7 @@ export const App: React.FC = () => {
     const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
 
     const unsubscribe = NetworkService.subscribeToRoom(normRoomId, {
-      onMessage: (payload: any) => {
+      onMessage: async (payload: any) => {
         if (!payload) return;
         const senderHandle = (payload.senderHandle || '').toLowerCase();
         if (senderHandle === cleanMe) return;
@@ -749,11 +920,21 @@ export const App: React.FC = () => {
         const isVoice = payload.iv === 'voice' || payload.ciphertext?.startsWith('🎤');
         const isPhoto = Boolean(payload.mediaUrl);
 
+        let plainText = payload.ciphertext || payload.text || '';
+        if (payload.iv && payload.iv !== 'direct' && payload.iv !== 'voice' && payload.iv !== 'photo') {
+          try {
+            const roomKey = await CryptoService.deriveKeyFromCode(normRoomId);
+            plainText = await CryptoService.decrypt(payload.ciphertext, payload.iv, roomKey);
+          } catch {
+            plainText = payload.ciphertext || payload.text || '';
+          }
+        }
+
         const incomingMsg: MessageItem = {
           id: payload.id || 'msg_' + Date.now(),
           sender: 'them',
           type: isPhoto ? 'photo' : (isVoice ? 'voice' : 'text'),
-          text: payload.ciphertext || payload.text || '',
+          text: plainText,
           previewUrl: payload.mediaUrl,
           caption: payload.caption,
           duration: payload.audioDuration ? `0:0${payload.audioDuration}` : '0:04',
@@ -763,6 +944,7 @@ export const App: React.FC = () => {
           seen: !payload.isHoldToReveal,
           shielded: payload.isHoldToReveal ?? false,
           reactions: [],
+          status: 'delivered',
           time: new Date(payload.createdAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           disintegrating: false,
         };
@@ -777,7 +959,8 @@ export const App: React.FC = () => {
         }));
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
 
-        NetworkService.broadcastDeliveryAck(normRoomId, incomingMsg.id, 'delivered');
+        // Broadcast read ACK immediately because receiver is actively viewing the chat screen!
+        NetworkService.broadcastDeliveryAck(normRoomId, incomingMsg.id, 'read', cleanThem);
       },
 
       onTyping: (handle: string) => {
@@ -831,14 +1014,19 @@ export const App: React.FC = () => {
       },
 
       onDeliveryAck: (data: { msgId: string; status: 'delivered' | 'read' }) => {
-        if (data?.status === 'read') {
-          setChats((prev) => ({
-            ...prev,
-            [activeContact.id]: (prev[activeContact.id] || []).map((m) =>
-              data.msgId === 'all' || m.id === data.msgId ? { ...m, seen: true } : m
-            ),
-          }));
-        }
+        setChats((prev) => ({
+          ...prev,
+          [activeContact.id]: (prev[activeContact.id] || []).map((m) => {
+            if (data.msgId === 'all' || m.id === data.msgId) {
+              return {
+                ...m,
+                status: data.status,
+                seen: data.status === 'read' ? true : m.seen,
+              };
+            }
+            return m;
+          }),
+        }));
       },
     });
 
@@ -847,10 +1035,10 @@ export const App: React.FC = () => {
     };
   }, [screen, activeContactId, activeContact, myHandle, decoyModeActive]);
 
-  // Auto-lock when minimized/hidden if configured
+  // Auto-lock when minimized/hidden only if explicitly enabled by user
   useEffect(() => {
     const handleVis = () => {
-      if (document.visibilityState === 'hidden') {
+      if (document.visibilityState === 'hidden' && localStorage.getItem('blink_app_lock_enabled') === 'true') {
         setIsLocked(true);
         localStorage.setItem('blink_app_lock_active', 'true');
       }
@@ -858,6 +1046,34 @@ export const App: React.FC = () => {
     document.addEventListener('visibilitychange', handleVis);
     return () => document.removeEventListener('visibilitychange', handleVis);
   }, []);
+
+  // Native Android Hardware Back Button Handling
+  useEffect(() => {
+    let backSub: any = null;
+    try {
+      CapApp.addListener('backButton', () => {
+        if (showCameraModal) {
+          setShowCameraModal(false);
+        } else if (showQrPinPopover) {
+          setShowQrPinPopover(false);
+        } else if (showConnectSheet) {
+          setShowConnectSheet(false);
+        } else if (showRequestsDrawer) {
+          setShowRequestsDrawer(false);
+        } else if (screen === 'chat') {
+          setScreen('list');
+        } else {
+          CapApp.exitApp();
+        }
+      }).then((sub) => {
+        backSub = sub;
+      });
+    } catch {}
+
+    return () => {
+      if (backSub && backSub.remove) backSub.remove();
+    };
+  }, [showCameraModal, showQrPinPopover, showConnectSheet, showRequestsDrawer, screen]);
 
   // Smoothly decay typing aurora pulse
   useEffect(() => {
@@ -947,15 +1163,17 @@ export const App: React.FC = () => {
 
   // Confirm Regenerate Code from Disclaimer Popup
   const confirmRegenerateCode = () => {
-    const GHOST_NAMES = ['phantom', 'falcon', 'specter', 'shadow', 'cipher', 'pulsar', 'vortex'];
-    const randomName = GHOST_NAMES[Math.floor(Math.random() * GHOST_NAMES.length)];
-    const randomNum = Math.floor(100 + Math.random() * 899);
-    const newHandle = `@${randomName}_${randomNum}`;
-    setMyHandle(newHandle);
-    const pin = handleToPin(`${randomName}_${randomNum}`).slice(0, 6);
-    setMyCode(pin);
+    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    setMyCode(newPin);
+    localStorage.setItem('blink_user_code', newPin);
     setShowRegenerateDisclaimer(false);
     audio.play('receive');
+  };
+
+  const handleResetAccount = () => {
+    StorageService.clearAll();
+    localStorage.clear();
+    window.location.reload();
   };
 
   // Restore Account with @handle + 4-Digit Recovery PIN
@@ -1065,6 +1283,7 @@ export const App: React.FC = () => {
           }
         : null,
       reactions: [],
+      status: 'sent',
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       disintegrating: false,
     };
@@ -1081,39 +1300,56 @@ export const App: React.FC = () => {
     setShieldMode(false);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
 
-    // Broadcast to Supabase Realtime
+    // Broadcast to Supabase Realtime with Hardware AES-256-GCM Encryption
     if (activeContact && !decoyModeActive) {
       const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
       const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
       const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
-      NetworkService.broadcastMessage(
-        normRoomId,
-        {
-          id: newId,
-          roomId: normRoomId,
-          senderId: 'usr_' + cleanMe,
-          senderHandle: cleanMe,
-          senderDisplayName: myHandle,
-          ciphertext: newMsg.text,
-          iv: 'direct',
-          createdAt: Date.now(),
-          timerSeconds: total,
-          expiresAt: 0,
-          isBurnOnRead: chosenTimer === 'burn',
-          isHoldToReveal: chosenShield,
-          status: 'sent',
-        },
-        activeContact.code,
-        cleanThem
-      ).catch(() => {});
+
+      (async () => {
+        let wireCipher = newMsg.text;
+        let wireIv = 'direct';
+        try {
+          const roomKey = await CryptoService.deriveKeyFromCode(normRoomId);
+          const encrypted = await CryptoService.encrypt(newMsg.text, roomKey);
+          wireCipher = encrypted.ciphertext;
+          wireIv = encrypted.iv;
+        } catch {
+          wireCipher = newMsg.text;
+          wireIv = 'direct';
+        }
+
+        const myRealName = StorageService.getProfile()?.displayName || myHandle.replace(/^@/, '');
+        await NetworkService.broadcastMessage(
+          normRoomId,
+          {
+            id: newId,
+            roomId: normRoomId,
+            senderId: 'usr_' + cleanMe,
+            senderHandle: cleanMe,
+            senderDisplayName: myRealName,
+            ciphertext: wireCipher,
+            iv: wireIv,
+            createdAt: Date.now(),
+            timerSeconds: total,
+            expiresAt: 0,
+            isBurnOnRead: chosenTimer === 'burn',
+            isHoldToReveal: chosenShield,
+            status: 'sent',
+          },
+          activeContact.code,
+          cleanThem
+        );
+      })().catch(() => {});
     }
 
-    // If Auto-Seen simulation is ON, partner reads the message after 2.2 seconds
+    // If Auto-Seen simulation is ON, partner reads the message after 2.0 seconds
     if (autoSeenSim && !chosenShield) {
       setTimeout(() => {
-        markMessageSeen(activeContactId, newId);
-      }, 2200);
+        markMessageSeen(activeContact.id, newId);
+      }, 2000);
     }
+
   };
 
   // Toggle Emoji Reaction on Message
@@ -1132,16 +1368,25 @@ export const App: React.FC = () => {
       }),
     }));
     setActiveReactionMsgId(null);
+
+    // Broadcast reaction across Supabase Realtime so partner sees it immediately
+    if (activeContact && !decoyModeActive && activeContact.id !== 'placeholder') {
+      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+      NetworkService.broadcastReaction(normRoomId, msgId, emoji).catch(() => {});
+    }
   };
 
   // Inject Screenshot Blocked Security Event Pill
   const triggerScreenshotBlockedAlert = () => {
     audio.play('alert');
+    const contactName = activeContact?.name || 'Peer';
     const alertMsg: MessageItem = {
       id: 'sys_' + Date.now(),
       sender: 'system',
       type: 'screenshot_alert',
-      text: `🛡️ Screenshot attempt by ${activeContact.name.split(' ')[0]} blocked by Phantom Shield`,
+      text: `🛡️ Screenshot attempt by ${contactName.split(' ')[0]} blocked by Phantom Shield`,
       seen: false,
       totalSeconds: 60,
       remainingSeconds: 60,
@@ -1155,32 +1400,114 @@ export const App: React.FC = () => {
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
   };
 
-  // Send Listen-Once Voice Note
-  const handleSendVoice = () => {
-    const dur = Math.max(2, recordSecs);
-    const newId = 'v_' + Date.now();
-    const newMsg: MessageItem = {
-      id: newId,
-      sender: 'me',
-      type: 'voice',
-      text: `Voice Note (0:0${Math.min(9, dur)})`,
-      duration: `0:0${Math.min(9, dur)}`,
-      timerMode: 'burn',
-      totalSeconds: 4,
-      remainingSeconds: 4,
-      seen: false,
-      shielded: false,
-      reactions: [],
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      disintegrating: false,
-    };
-    audio.play('send');
+  // Hardware MediaRecorder Voice Note Studio
+  const handleStartVoiceRecord = async () => {
+    try {
+      audio.play('tap');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.start();
+      setIsRecording(true);
+      setRecordSecs(0);
+    } catch {
+      alert('Microphone permission required for Voice Notes.');
+    }
+  };
+
+  const handleCancelVoiceRecord = () => {
+    audio.play('tap');
     setIsRecording(false);
-    setChats((prev) => ({
-      ...prev,
-      [activeContactId]: [...(prev[activeContactId] || []), newMsg],
-    }));
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      audioChunksRef.current = [];
+      mediaRecorderRef.current.stop();
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach((t) => t.stop());
+    }
+  };
+
+  const handleSendVoice = () => {
+    const dur = Math.max(1, recordSecs);
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording') {
+      setIsRecording(false);
+      return;
+    }
+
+    mediaRecorderRef.current.onstop = () => {
+      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64Audio = reader.result as string;
+        const newId = 'v_' + Date.now();
+        const newMsg: MessageItem = {
+          id: newId,
+          sender: 'me',
+          type: 'voice',
+          text: `Voice Note (0:0${Math.min(9, dur)})`,
+          previewUrl: base64Audio,
+          duration: `0:0${Math.min(9, dur)}`,
+          timerMode: 'burn',
+          totalSeconds: dur + 2,
+          remainingSeconds: dur + 2,
+          seen: false,
+          shielded: false,
+          reactions: [],
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          disintegrating: false,
+        };
+
+        audio.play('send');
+        setChats((prev) => ({
+          ...prev,
+          [activeContact.id]: [...(prev[activeContact.id] || []), newMsg],
+        }));
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+        // Broadcast over Realtime
+        if (activeContact && !decoyModeActive && activeContact.id !== 'placeholder') {
+          const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+          const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+          const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+          NetworkService.broadcastMessage(
+            normRoomId,
+            {
+              id: newId,
+              roomId: normRoomId,
+              senderId: 'usr_' + cleanMe,
+              senderHandle: cleanMe,
+              senderDisplayName: myHandle,
+              ciphertext: '🎤 Voice Note',
+              iv: 'voice',
+              mediaUrl: base64Audio,
+              audioDuration: dur,
+              createdAt: Date.now(),
+              timerSeconds: dur + 2,
+              expiresAt: 0,
+              isBurnOnRead: true,
+              isHoldToReveal: false,
+              status: 'sent',
+            },
+            activeContact.code,
+            cleanThem
+          ).catch(() => {});
+        }
+      };
+      reader.readAsDataURL(audioBlob);
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+    };
+
+    mediaRecorderRef.current.stop();
+    setIsRecording(false);
   };
 
   // Real Gallery & Camera Photo Handler
@@ -1364,6 +1691,13 @@ export const App: React.FC = () => {
         m.id === msg.id ? { ...m, seen: true, everRevealed: true } : m
       ),
     }));
+
+    if (activeContact && msg.sender === 'them') {
+      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+      NetworkService.broadcastDeliveryAck(normRoomId, msg.id, 'read', cleanThem).catch(() => {});
+    }
   };
 
   const handleHoldEnd = (msg: MessageItem) => {
@@ -1373,15 +1707,37 @@ export const App: React.FC = () => {
     }
   };
 
-  // Listen-Once Voice Note Playback
+  // Listen-Once Voice Note Playback (Real Audio + Auto-Vaporize)
   const handlePlayVoice = (msg: MessageItem) => {
-    if (playingVoiceId === msg.id || msg.disintegrating) return;
+    if (playingVoiceId === msg.id || msg.disintegrating) {
+      if (activeAudioPlayerRef.current) {
+        activeAudioPlayerRef.current.pause();
+      }
+      setPlayingVoiceId(null);
+      return;
+    }
+
+    if (activeAudioPlayerRef.current) {
+      activeAudioPlayerRef.current.pause();
+    }
+
     audio.play('tap');
     setPlayingVoiceId(msg.id);
-    setTimeout(() => {
-      setPlayingVoiceId(null);
-      vaporizeNow(activeContactId, msg.id);
-    }, 2400);
+
+    if (msg.previewUrl) {
+      const audioObj = new Audio(msg.previewUrl);
+      activeAudioPlayerRef.current = audioObj;
+      audioObj.play().catch(() => {});
+      audioObj.onended = () => {
+        setPlayingVoiceId(null);
+        vaporizeNow(activeContactId, msg.id);
+      };
+    } else {
+      setTimeout(() => {
+        setPlayingVoiceId(null);
+        vaporizeNow(activeContactId, msg.id);
+      }, 2500);
+    }
   };
 
   // Panic Burn Entire Chat
@@ -1402,43 +1758,65 @@ export const App: React.FC = () => {
     }, 450);
   };
 
-  // Simulate Incoming Message (No Screen Hijack)
-  const triggerIncomingDemo = () => {
-    const target = contacts.find((c) => c.id !== activeContactId) || contacts[1];
-    const incomingMsg: MessageItem = {
-      id: 'in_' + Date.now(),
-      sender: 'them',
-      type: 'text',
-      text: 'Code lock checked! Yeh message padhte hi 10s me smoke ban jayega 🔥',
-      timerMode: '10s',
-      totalSeconds: 10,
-      remainingSeconds: 10,
-      seen: false,
-      shielded: true,
-      time: 'Just now',
-      disintegrating: false,
-    };
+  // Universal QR / Deep-link / PIN String Parser
+  const parseScannedQR = (raw: string): string => {
+    if (!raw) return '';
+    const trimmed = raw.trim();
 
-    audio.play('receive');
-    setChats((prev) => ({
-      ...prev,
-      [target.id]: [...(prev[target.id] || []), incomingMsg],
-    }));
-    setContacts((prev) =>
-      prev.map((c) =>
-        c.id === target.id ? { ...c, unread: (c.unread || 0) + 1, time: 'Now' } : c
-      )
-    );
-    setInAppBanner({
-      name: target.name,
-      code: target.code,
-      text: '🛡️ Encrypted Stealth Message',
-    });
-    setTimeout(() => setInAppBanner(null), 3000);
+    // Reject foreign external URLs (e.g. Telegram t.me, WhatsApp, random web addresses)
+    if (/^https?:\/\//i.test(trimmed)) {
+      if (!trimmed.includes('blinkmsg.app') && !trimmed.includes('code=')) {
+        return '';
+      }
+    }
+
+    // 1. Check for URL query param code=... or handle=...
+    if (trimmed.includes('code=')) {
+      const extracted = trimmed.split('code=')[1].split('&')[0].split('#')[0].replace(/\D/g, '');
+      if (extracted.length === 6) return extracted;
+    }
+    if (trimmed.includes('handle=')) {
+      const extracted = trimmed.split('handle=')[1].split('&')[0].split('#')[0].replace(/[^a-zA-Z0-9_]/g, '');
+      if (extracted) return `@${extracted}`;
+    }
+
+    // 2. Check for URL path format: /join/768049 or /join/@alex
+    const joinMatch = trimmed.match(/\/join\/(@?[a-zA-Z0-9_]+)/i);
+    if (joinMatch && joinMatch[1]) {
+      const target = joinMatch[1];
+      const digitsOnly = target.replace(/\D/g, '');
+      if (digitsOnly.length === 6) return digitsOnly;
+      return target.startsWith('@') ? target : `@${target}`;
+    }
+
+    // 3. Check for JSON format { "code": "..." } or { "handle": "..." }
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.code) return String(parsed.code).replace(/\D/g, '');
+        if (parsed.handle) return parsed.handle.startsWith('@') ? parsed.handle : `@${parsed.handle}`;
+      } catch {}
+    }
+
+    // 4. Check for clean 6-digit PIN anywhere in string
+    const digitsOnly = trimmed.replace(/\D/g, '');
+    if (digitsOnly.length === 6) {
+      return digitsOnly;
+    }
+
+    // 5. Check for @handle pattern (e.g. @rahul_007)
+    const handleMatch = trimmed.match(/^@?([a-zA-Z0-9_]{3,})$/);
+    if (handleMatch && handleMatch[1]) {
+      return `@${handleMatch[1]}`;
+    }
+
+    return '';
   };
 
   // Connect directly by code or handle and open chat immediately
-  const connectDirectly = async (rawTarget: string, customName?: string) => {
+  const connectDirectly = async (rawInput: string, customName?: string) => {
+    if (!rawInput) return;
+    const rawTarget = parseScannedQR(rawInput);
     if (!rawTarget) return;
     const cleanDigits = rawTarget.replace(/\D/g, '');
     const cleanHandle = rawTarget.toLowerCase().replace(/^@/, '').trim();
@@ -1472,33 +1850,30 @@ export const App: React.FC = () => {
       return;
     }
 
-    // 3. Search Supabase for real user profile
-    let partnerName = customName || '';
-    let partnerHandle = '';
-    let partnerCode = cleanDigits.slice(0, 6);
-    let partnerAvatar =
-      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
-
+    // 3. Instant Connect: Create new cipher tunnel immediately
+    let foundProfile: UserProfile | null = null;
     try {
-      const found = await NetworkService.findProfileByPin(rawTarget);
-      if (found) {
-        partnerName = found.displayName || found.handle;
-        partnerHandle = `@${found.handle}`;
-        partnerCode = found.pin || handleToPin(found.handle).slice(0, 6);
-      }
+      foundProfile = await NetworkService.findProfileByPin(rawTarget);
     } catch {}
 
-    if (!partnerHandle) {
-      const isHandle = rawTarget.startsWith('@');
+    const pCode = cleanDigits.length === 6 ? cleanDigits : (cleanDigits || '768049').slice(0, 6);
+    let partnerName = customName;
+    let partnerHandle = '';
+    let partnerCode = pCode;
+
+    if (foundProfile) {
+      partnerName = partnerName || foundProfile.displayName || foundProfile.handle;
+      partnerHandle = `@${foundProfile.handle.replace(/^@/, '')}`;
+      partnerCode = foundProfile.pin || pCode;
+    } else {
+      const isHandle = rawTarget.startsWith('@') || !cleanDigits;
       if (isHandle) {
-        partnerHandle = rawTarget;
-        partnerName = partnerName || `${rawTarget.slice(1)} ✨`;
-        partnerCode = handleToPin(rawTarget.slice(1)).slice(0, 6);
+        partnerHandle = `@${cleanHandle}`;
+        partnerName = partnerName || `${cleanHandle} ✨`;
+        partnerCode = handleToPin(cleanHandle).slice(0, 6);
       } else {
-        const pCode = cleanDigits.length === 6 ? cleanDigits : '768049';
-        partnerCode = pCode;
-        partnerHandle = `@user_${partnerCode.slice(0, 4)}`;
-        partnerName = partnerName || `Partner #${partnerCode.slice(0, 3)}`;
+        partnerHandle = `@user_${pCode.slice(0, 4)}`;
+        partnerName = partnerName || `Partner #${pCode.slice(0, 3)}`;
       }
     }
 
@@ -1509,19 +1884,51 @@ export const App: React.FC = () => {
       name: partnerName,
       handle: partnerHandle,
       code: partnerCode,
-      avatar: partnerAvatar,
+      avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
       color: 'from-emerald-500 to-teal-500',
       online: true,
       unread: 0,
       time: 'Now',
     };
 
+    // Broadcast notice to peer's inbox so peer adds me to their contacts too!
+    const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+    const myRealName = StorageService.getProfile()?.displayName || myHandle.replace(/^@/, '');
+    NetworkService.sendPeerConnectedNotice(cleanPHandle, {
+      id: 'usr_' + cleanMe,
+      handle: cleanMe,
+      displayName: myRealName,
+      pin: myCode.replace(/\D/g, ''),
+    }).catch(() => {});
+
     audio.play('receive');
     setContacts((prev) => [newContact, ...prev.filter((c) => c.id !== newId)]);
+    setChats((prev) => ({
+      ...prev,
+      [newId]: prev[newId] || [],
+    }));
     setShowQrPinPopover(false);
     setShowConnectSheet(false);
     setActiveContactId(newId);
     setScreen('chat');
+
+    // Async Supabase profile enrichment in background (never blocks UI)
+    NetworkService.findProfileByPin(rawTarget).then((found) => {
+      if (found) {
+        setContacts((prev) =>
+          prev.map((c) =>
+            c.id === newId
+              ? {
+                  ...c,
+                  name: found.displayName || found.handle,
+                  handle: `@${found.handle}`,
+                  code: found.pin || c.code,
+                }
+              : c
+          )
+        );
+      }
+    }).catch(() => {});
 
     // Notify partner over Supabase Realtime
     const myClean = myHandle.replace(/^@/, '').toLowerCase();
@@ -1676,98 +2083,57 @@ export const App: React.FC = () => {
 
       {/* NATIVE APP CONTAINER (FULL SCREEN MOBILE / SLEEK DESKTOP) */}
       <div className="relative z-10 w-full sm:max-w-[420px] h-[100dvh] sm:h-[880px] sm:max-h-[94vh] bg-[#09090B] sm:rounded-3xl sm:border sm:border-white/10 shadow-[0_25px_90px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden">
-        {/* DECOY SAFE MODE ACTIVE BANNER */}
-        {decoyModeActive && (
-          <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-1.5 flex items-center justify-between text-[11px] text-amber-300 z-30">
-            <span>🎭 Decoy PIN (0000) Active — Real Chats Hidden</span>
-            <button
-              onClick={() => {
-                setDecoyModeActive(false);
-                setActiveContactId('c1');
-                audio.play('receive');
-              }}
-              className="underline font-bold text-amber-200"
-            >
-              Exit Decoy
-            </button>
-          </div>
-        )}
-
-        {/* NON-HIJACKING IN-APP NOTIFICATION PILL */}
-        {inAppBanner && (
-          <div
-            onClick={() => {
-              setScreen('list');
-              setInAppBanner(null);
-            }}
-            className="absolute top-12 inset-x-4 z-50 bg-zinc-900/95 border border-[#00F5A0]/40 backdrop-blur-2xl p-3 rounded-2xl shadow-2xl flex items-center justify-between cursor-pointer animate-bounce"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-[#00F5A0]/20 border border-[#00F5A0]/40 flex items-center justify-center text-[#00F5A0] font-bold text-xs">
-                +1
-              </div>
-              <div>
-                <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                  <span>{inAppBanner.name}</span>
-                  <span className="text-[10px] font-mono text-zinc-400">#{inAppBanner.code}</span>
-                </div>
-                <div className="text-[11px] text-emerald-300">{inAppBanner.text}</div>
-              </div>
-            </div>
-            <span className="text-[10px] font-semibold text-zinc-400 bg-white/5 px-2 py-1 rounded-lg">
-              View
-            </span>
-          </div>
-        )}
-
         {/* =========================================================
             VIEW 0: ZERO-LOGIN ONBOARDING & ACCOUNT RESTORE SCREEN
            ========================================================= */}
         {screen === 'onboarding' && (
-          <div className="flex-1 flex flex-col justify-between p-6 bg-[#09090B] relative overflow-y-auto">
-            {/* Ambient Hero Glow */}
-            <div className="pointer-events-none absolute top-10 inset-x-0 flex justify-center">
-              <div className="w-56 h-56 bg-[#00F5A0]/20 rounded-full blur-3xl" />
+          <div className="flex-1 flex flex-col justify-between p-6 bg-[#07080B] relative overflow-y-auto">
+            {/* Ambient Hero Radial Glow */}
+            <div className="pointer-events-none absolute top-8 inset-x-0 flex justify-center">
+              <div className="w-64 h-64 bg-[#00F5A0]/15 rounded-full blur-[100px]" />
             </div>
 
-            <div className="relative z-10 text-center mt-2">
-              <div className="w-16 h-16 rounded-3xl bg-black border border-[#00F5A0]/40 mx-auto flex items-center justify-center shadow-[0_12px_35px_rgba(0,245,160,0.35)] mb-3 overflow-hidden p-1">
+            <div className="relative z-10 text-center mt-3">
+              <div className="w-20 h-20 rounded-3xl bg-black border border-[#00F5A0]/35 mx-auto flex items-center justify-center shadow-[0_12px_40px_rgba(0,245,160,0.25)] mb-3.5 overflow-hidden p-1.5 transition-transform hover:scale-105">
                 <img src="/logo.png" alt="BlinkMsg" className="w-full h-full object-contain rounded-2xl" />
               </div>
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#00F5A0]/10 border border-[#00F5A0]/30 text-[10px] font-semibold text-[#00F5A0] mb-2">
-                <Sparkles className="w-3 h-3" /> NO PHONE • NO EMAIL • ZERO TRACE
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#00F5A0]/10 border border-[#00F5A0]/25 text-[11px] font-bold text-[#00F5A0] mb-2 tracking-wide">
+                <Sparkles className="w-3.5 h-3.5" /> ZERO SIGN-UP • ZERO CLOUD TRACES
               </span>
-              <h1 className="text-2xl font-black tracking-tight text-white flex items-center justify-center space-x-1">
+              <h1 className="text-3xl font-black tracking-tight text-white flex items-center justify-center space-x-1">
                 <span>Blink</span>
                 <span className="text-[#00F5A0]">Msg</span>
               </h1>
-              <p className="text-xs text-zinc-400 mt-1 px-2 leading-relaxed">
-                Generate your cryptographic 6-digit connection code in one tap. Share with your partner—timers start only on Seen.
+              <p className="text-xs text-zinc-400 mt-1.5 px-3 leading-relaxed max-w-xs mx-auto">
+                No phone number or email required. Share your 6-digit code with your partner—timers start only once seen.
               </p>
             </div>
 
             {/* Slot-Machine 6-Digit Personal Code Card */}
-            <div className="relative z-10 my-4 p-4 rounded-3xl bg-zinc-900/90 border border-white/10 shadow-2xl space-y-3">
-              <div className="flex items-center justify-between text-[11px] text-zinc-400">
-                <span>YOUR PERMANENT 6-DIGIT ID</span>
-                <span className="text-[#00F5A0] font-mono">● E2EE Ready</span>
+            <div className="relative z-10 my-4 p-5 rounded-3xl bg-[#121217]/95 border border-white/10 shadow-2xl backdrop-blur-xl space-y-3.5">
+              <div className="flex items-center justify-between text-[11px] text-zinc-400 font-medium">
+                <span className="tracking-wide">YOUR 6-DIGIT STEALTH ID</span>
+                <span className="text-[#00F5A0] font-mono flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#00F5A0] inline-block animate-pulse" />
+                  E2EE Ready
+                </span>
               </div>
 
-              <div className="py-3 rounded-2xl bg-black/60 border border-[#00F5A0]/30 flex items-center justify-center">
+              <div className="py-4 rounded-2xl bg-black/70 border border-[#00F5A0]/30 flex items-center justify-center shadow-inner">
                 <span
-                  className={`font-mono text-3xl font-extrabold tracking-[0.22em] ${
+                  className={`font-mono text-3xl sm:text-4xl font-extrabold tracking-[0.25em] ${
                     isGeneratingId ? 'text-[#00F5A0] blur-[0.5px]' : 'text-white'
-                  }`}
+                  } transition-all`}
                 >
                   {myCode.replace(/\D/g, '')}
                 </span>
               </div>
 
               {/* Handle & 4-Digit Recovery PIN Row */}
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <div className="bg-zinc-950/80 border border-white/10 rounded-xl px-3 py-2">
-                  <label className="text-[9px] uppercase tracking-wider text-zinc-500 block">
-                    Unique @Handle
+              <div className="grid grid-cols-2 gap-2.5 pt-0.5">
+                <div className="bg-black/50 border border-white/10 rounded-2xl px-3.5 py-2.5 focus-within:border-[#00F5A0]/50 transition-colors">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
+                    Your @Handle
                   </label>
                   <input
                     type="text"
@@ -1775,25 +2141,20 @@ export const App: React.FC = () => {
                     onChange={(e) => {
                       const val = e.target.value;
                       setMyHandle(val);
-                      const clean = val.replace(/^@/, '').trim();
-                      if (clean) {
-                        const pin = handleToPin(clean);
-                        setMyCode(pin.slice(0, 6));
-                      }
                     }}
-                    className="w-full bg-transparent text-xs font-semibold text-white focus:outline-none mt-0.5"
+                    className="w-full bg-transparent text-[13px] font-semibold text-white focus:outline-none mt-0.5"
                   />
                 </div>
-                <div className="bg-zinc-950/80 border border-white/10 rounded-xl px-3 py-2">
-                  <label className="text-[9px] uppercase tracking-wider text-zinc-500 block">
-                    4-Digit Recovery PIN
+                <div className="bg-black/50 border border-white/10 rounded-2xl px-3.5 py-2.5 focus-within:border-[#00F5A0]/50 transition-colors">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
+                    4-Digit PIN
                   </label>
                   <input
                     type="text"
                     maxLength={4}
                     value={recoveryPin}
                     onChange={(e) => setRecoveryPin(e.target.value.replace(/\D/g, ''))}
-                    className="w-full bg-transparent font-mono text-xs font-bold tracking-widest text-[#00F5A0] focus:outline-none mt-0.5"
+                    className="w-full bg-transparent font-mono text-[14px] font-bold tracking-widest text-[#00F5A0] focus:outline-none mt-0.5"
                   />
                 </div>
               </div>
@@ -1801,15 +2162,15 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 onClick={handleSlotGenerateCode}
-                className="w-full py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-[#00F5A0] flex items-center justify-center gap-2 transition-all cursor-pointer"
+                className="w-full py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-[#00F5A0] flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingId ? 'animate-spin' : ''}`} />
-                <span>1-Tap Generate Secret Identity</span>
+                <span>Reroll Random Identity</span>
               </button>
             </div>
 
             {/* Primary CTA & Restore Account Trigger */}
-            <div className="relative z-10 space-y-2.5">
+            <div className="relative z-10 space-y-3 pb-2">
               <button
                 onClick={() => {
                   audio.play('send');
@@ -1831,17 +2192,17 @@ export const App: React.FC = () => {
                   NetworkService.syncProfileToSupabase(prof).catch(() => {});
                   setScreen('list');
                 }}
-                className="w-full py-3.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-black text-xs shadow-[0_10px_30px_rgba(0,245,160,0.35)] transition-all cursor-pointer"
+                className="w-full py-3.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-extrabold text-[13px] shadow-[0_10px_30px_rgba(0,245,160,0.3)] transition-all cursor-pointer active:scale-95"
               >
                 Enter Stealth Messenger →
               </button>
 
               <button
                 onClick={() => setShowRestoreSheet(true)}
-                className="w-full py-2.5 rounded-2xl bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs font-semibold text-zinc-300 flex items-center justify-center gap-1.5 cursor-pointer"
+                className="w-full py-2 text-xs font-medium text-zinc-400 hover:text-white flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
               >
                 <KeyRound className="w-3.5 h-3.5 text-[#00F5A0]" />
-                <span>Switching Phones? Restore with 4-Digit PIN</span>
+                <span>Switching phones? Restore with PIN</span>
               </button>
             </div>
 
@@ -1850,45 +2211,45 @@ export const App: React.FC = () => {
               <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur-md flex items-end justify-center p-4">
                 <form
                   onSubmit={handleRestoreAccount}
-                  className="w-full bg-[#141419] border border-white/15 rounded-3xl p-5 shadow-2xl space-y-3"
+                  className="w-full bg-[#14151B] border border-white/15 rounded-3xl p-5 shadow-2xl space-y-3.5 animate-in slide-in-from-bottom-3 duration-200"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span className="text-sm font-bold text-white flex items-center gap-2">
                       <KeyRound className="w-4 h-4 text-[#00F5A0]" />
-                      Restore Zero-Login Vault
+                      Restore Stealth Vault
                     </span>
                     <button
                       type="button"
                       onClick={() => setShowRestoreSheet(false)}
-                      className="p-1 rounded-full bg-white/5 text-zinc-400"
+                      className="p-1 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
-                  <p className="text-[11px] text-zinc-400">
+                  <p className="text-xs text-zinc-400 leading-relaxed">
                     Enter your <strong className="text-white">@handle</strong> and{' '}
-                    <strong className="text-white">4-Digit Recovery PIN</strong> to pull your encrypted identity onto this device.
+                    <strong className="text-white">4-Digit PIN</strong> to pull your encrypted profile onto this phone.
                   </p>
                   <input
                     type="text"
                     value={restoreHandleInput}
                     onChange={(e) => setRestoreHandleInput(e.target.value)}
                     placeholder="@your_handle"
-                    className="w-full bg-zinc-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none"
+                    className="w-full bg-black/50 border border-white/10 rounded-2xl px-4 py-3 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#00F5A0]/50"
                   />
                   <input
                     type="text"
                     maxLength={4}
                     value={restorePinInput}
                     onChange={(e) => setRestorePinInput(e.target.value.replace(/\D/g, ''))}
-                    placeholder="4-Digit Recovery PIN (e.g. 2580)"
-                    className="w-full bg-zinc-900 border border-[#00F5A0]/40 rounded-xl px-3.5 py-2.5 text-center font-mono text-base font-bold tracking-[0.5em] text-[#00F5A0] focus:outline-none"
+                    placeholder="4-Digit PIN"
+                    className="w-full bg-black/50 border border-[#00F5A0]/40 rounded-2xl px-4 py-3 text-center font-mono text-lg font-bold tracking-[0.5em] text-[#00F5A0] placeholder-zinc-600 focus:outline-none shadow-inner"
                   />
                   <button
                     type="submit"
-                    className="w-full py-2.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-extrabold text-xs cursor-pointer"
+                    className="w-full py-3 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-extrabold text-xs cursor-pointer shadow-lg shadow-[#00F5A0]/25 active:scale-95 transition-all"
                   >
-                    {restoreSuccess ? '✓ Vault Restored!' : 'Unlock & Sync Chats'}
+                    {restoreSuccess ? '✓ Identity Restored!' : 'Unlock & Sync Identity'}
                   </button>
                 </form>
               </div>
@@ -1900,14 +2261,19 @@ export const App: React.FC = () => {
             VIEW 1: SLEEK CHAT LIST (HOME SCREEN + HANDSHAKE REQUESTS)
            ========================================================= */}
         {screen === 'list' && (
-          <div className="flex-1 flex flex-col overflow-hidden bg-[#09090B]">
-            {/* Minimal Top Header */}
-            <div className="px-5 pt-2 pb-3 flex items-center justify-between">
+          <div className="flex-1 flex flex-col overflow-hidden bg-[#07080B] relative">
+            {activeTab === 'chats' ? (
+              <>
+                {/* Minimal Top Header */}
+            <div className="px-5 pt-3.5 pb-3 flex items-center justify-between border-b border-white/[0.05]">
               <div className="flex items-center gap-2.5">
                 <div>
-                  <div className="flex items-center gap-1.5">
-                    <h1 className="text-xl font-extrabold tracking-tight text-white">BlinkMsg</h1>
-                    <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/10 border border-[#00F5A0]/30 px-2 py-0.5 rounded-full font-semibold">
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl font-extrabold tracking-tight text-white flex items-center gap-1.5">
+                      <span>BlinkMsg</span>
+                      <span className="w-2 h-2 rounded-full bg-[#00F5A0] shadow-[0_0_8px_#00F5A0]" />
+                    </h1>
+                    <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/10 border border-[#00F5A0]/25 px-2 py-0.5 rounded-full font-semibold">
                       {myHandle}
                     </span>
                     {ghostMode && (
@@ -1916,76 +2282,37 @@ export const App: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-zinc-500 font-mono">Zero-Login Stealth Messenger</p>
+                  <p className="text-[11px] text-zinc-500 mt-0.5">Disappearing Stealth Messenger</p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1.5">
-                {/* My 6-Digit Code & QR Trigger Pill (PURE 6 DIGITS, NO DASH) */}
-                <button
-                  onClick={() => {
-                    setPopoverTab('qr');
-                    setShowQrPinPopover(true);
-                  }}
-                  className="flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 border border-white/10 px-2.5 py-1.5 rounded-full transition-all cursor-pointer"
-                >
-                  <QrCode className="w-3.5 h-3.5 text-[#00F5A0]" />
-                  <span className="text-xs font-mono font-semibold text-zinc-200">
-                    {myCode.replace(/\D/g, '')}
-                  </span>
-                </button>
-
-                {/* Settings Tab Button */}
-                <button
-                  onClick={() => setShowSettingsModal(true)}
-                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-400 hover:text-white transition-all cursor-pointer"
-                  title="Settings & Security"
-                >
-                  <Settings className="w-4 h-4" />
-                </button>
-
-                {/* Ghost Mode Toggle */}
-                <button
-                  onClick={() => {
-                    setGhostMode(!ghostMode);
-                    audio.play('tap');
-                  }}
-                  className={`p-2 rounded-full border transition-all cursor-pointer ${
-                    ghostMode
-                      ? 'bg-violet-500/20 border-violet-500/40 text-violet-300'
-                      : 'bg-zinc-900 border-white/10 text-zinc-400 hover:text-white'
-                  }`}
-                  title="Ghost Mode (Hide Online Status)"
-                >
-                  <Ghost className="w-4 h-4" />
-                </button>
-
-                {/* Direct Camera QR Scanner Button */}
+              <div className="flex items-center gap-2">
+                {/* Quick Camera Scanner Button */}
                 <button
                   onClick={() => setShowCameraModal(true)}
-                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-[#00F5A0] hover:text-white transition-all cursor-pointer"
+                  className="p-2 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-white/10 text-[#00F5A0] transition-all cursor-pointer active:scale-95 shadow-sm"
                   title="Scan Friend's QR Code"
                 >
                   <Camera className="w-4 h-4" />
                 </button>
 
-                {/* Connect Friend Button */}
+                {/* Settings Tab Button */}
                 <button
-                  onClick={() => setShowConnectSheet(!showConnectSheet)}
-                  className="p-2 rounded-full bg-[#00F5A0] hover:bg-[#00e090] text-black shadow-lg shadow-[#00F5A0]/25 transition-all cursor-pointer"
-                  title="Add Friend via 6-Digit Code"
+                  onClick={() => setActiveTab('profile')}
+                  className="p-2 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-white/10 text-zinc-400 hover:text-white transition-all cursor-pointer active:scale-95 shadow-sm"
+                  title="Settings & Security"
                 >
-                  <Plus className="w-4 h-4 stroke-[3]" />
+                  <Settings className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
             {/* Quick Connect Slide-Down Bar with Live Peer Lookup */}
             {showConnectSheet && (
-              <div className="mx-5 mb-3 p-3.5 rounded-2xl bg-zinc-900/95 border border-[#00F5A0]/40 shadow-xl shadow-black/60 space-y-3">
+              <div className="mx-4 mt-3 mb-2 p-4 rounded-3xl bg-[#14151B]/95 border border-[#00F5A0]/35 shadow-2xl backdrop-blur-2xl space-y-3 animate-in fade-in slide-in-from-top-2">
                 <form
                   onSubmit={handleConnectFriend}
-                  className="flex items-center gap-2 bg-black/40 border border-white/10 rounded-xl px-3 py-2"
+                  className="flex items-center gap-2.5 bg-black/50 border border-white/10 rounded-2xl px-3.5 py-2.5"
                 >
                   <KeyRound className="w-4 h-4 text-[#00F5A0] shrink-0" />
                   <input
@@ -1993,7 +2320,7 @@ export const App: React.FC = () => {
                     value={connectCodeInput}
                     onChange={(e) => setConnectCodeInput(e.target.value)}
                     placeholder="Enter 6-digit PIN (e.g. 768049) or @handle"
-                    className="flex-1 bg-transparent text-xs text-white placeholder-zinc-500 focus:outline-none"
+                    className="flex-1 bg-transparent text-[13px] text-white placeholder-zinc-500 focus:outline-none"
                     autoFocus
                   />
                   <button
@@ -2002,10 +2329,10 @@ export const App: React.FC = () => {
                       setShowConnectSheet(false);
                       setShowCameraModal(true);
                     }}
-                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-[#00F5A0] cursor-pointer"
+                    className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-[#00F5A0] cursor-pointer"
                     title="Scan QR with Camera"
                   >
-                    <Camera className="w-3.5 h-3.5" />
+                    <Camera className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
@@ -2017,13 +2344,13 @@ export const App: React.FC = () => {
                     }}
                     className="p-1 text-zinc-400 hover:text-white cursor-pointer"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </form>
 
                 {/* Searching Indicator */}
                 {isSearchingTarget && (
-                  <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-emerald-400">
+                  <div className="flex items-center gap-2 px-2 py-1 text-xs text-emerald-400">
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                     <span>Searching stealth network for peer...</span>
                   </div>
@@ -2031,31 +2358,31 @@ export const App: React.FC = () => {
 
                 {/* Found Verified User Card */}
                 {searchTargetProfile && (
-                  <div className="p-3 rounded-xl bg-emerald-950/30 border border-[#00F5A0]/40 space-y-2.5">
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/40 border border-[#00F5A0]/40 space-y-3">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <img
-                          src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-                          alt={searchTargetProfile.displayName}
-                          className="w-9 h-9 rounded-full object-cover border border-[#00F5A0]/60 shrink-0"
+                      <div className="flex items-center gap-3 min-w-0">
+                        <Avatar
+                          avatarId={searchTargetProfile.avatarId || 1}
+                          size="md"
+                          name={searchTargetProfile.displayName || searchTargetProfile.handle}
                         />
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-bold text-white truncate">
+                            <span className="text-sm font-bold text-white truncate">
                               {searchTargetProfile.displayName || searchTargetProfile.handle}
                             </span>
-                            <span className="text-[9px] font-mono text-[#00F5A0] bg-[#00F5A0]/15 px-1.5 py-0.5 rounded font-black">
+                            <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/15 px-2 py-0.5 rounded-md font-bold">
                               PIN #{searchTargetProfile.pin || handleToPin(searchTargetProfile.handle).slice(0, 6)}
                             </span>
                           </div>
-                          <p className="text-[10px] text-zinc-400 truncate">
-                            @{searchTargetProfile.handle} • <span className="text-emerald-400">Verified Peer 🟢</span>
+                          <p className="text-[11px] text-zinc-400 truncate mt-0.5">
+                            @{searchTargetProfile.handle} • <span className="text-[#00F5A0] font-medium">Verified Peer 🟢</span>
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    <div className="grid grid-cols-2 gap-2 pt-0.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -2064,7 +2391,7 @@ export const App: React.FC = () => {
                           setShowConnectSheet(false);
                           setSearchTargetProfile(null);
                         }}
-                        className="py-1.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#00F5A0]/20"
+                        className="py-2 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#00F5A0]/25 active:scale-95 transition-all"
                       >
                         <Zap className="w-3.5 h-3.5" />
                         <span>Direct Chat</span>
@@ -2073,7 +2400,7 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleSendHandshake(searchTargetProfile)}
-                        className="py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-white/10"
+                        className="py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-white/10 active:scale-95 transition-all"
                       >
                         <UserPlus className="w-3.5 h-3.5 text-[#00F5A0]" />
                         <span>Send Request</span>
@@ -2084,12 +2411,12 @@ export const App: React.FC = () => {
 
                 {/* Error / Not Found Status */}
                 {targetSearchError && !searchTargetProfile && (
-                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2">
-                    <p className="text-[11px] text-amber-300">{targetSearchError}</p>
+                  <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2">
+                    <p className="text-xs text-amber-300">{targetSearchError}</p>
                     <button
                       type="button"
                       onClick={() => handleConnectFriend()}
-                      className="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-300 text-zinc-950 text-[10px] font-bold shrink-0 cursor-pointer"
+                      className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-bold shrink-0 cursor-pointer active:scale-95 transition-all"
                     >
                       Connect anyway
                     </button>
@@ -2099,15 +2426,15 @@ export const App: React.FC = () => {
             )}
 
             {/* Search Bar */}
-            <div className="px-5 mb-2.5">
+            <div className="px-4 my-2.5">
               <div className="relative">
                 <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search @handle or 6-digit code..."
-                  className="w-full bg-zinc-900/90 border border-white/[0.06] rounded-2xl pl-10 pr-4 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#00F5A0]/40"
+                  placeholder="Search contacts, @handle or 6-digit code..."
+                  className="w-full bg-[#13141B] border border-white/[0.07] rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#00F5A0]/40 transition-colors shadow-inner"
                 />
               </div>
             </div>
@@ -2116,56 +2443,56 @@ export const App: React.FC = () => {
                 CONNECTION REQUEST HANDSHAKE SECTION (PENDING REQUESTS)
                ========================================================= */}
             {!decoyModeActive && pendingRequests.length > 0 && (
-              <div className="px-5 mb-2">
+              <div className="px-4 mb-2">
                 <button
                   onClick={() => setShowRequestsDrawer(!showRequestsDrawer)}
-                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/25 text-xs font-semibold text-[#00F5A0] cursor-pointer"
+                  className="w-full flex items-center justify-between px-3.5 py-2 rounded-2xl bg-[#00F5A0]/10 border border-[#00F5A0]/25 text-xs font-semibold text-[#00F5A0] cursor-pointer"
                 >
-                  <span className="flex items-center gap-1.5">
-                    <UserPlus className="w-3.5 h-3.5" />
+                  <span className="flex items-center gap-2">
+                    <UserPlus className="w-4 h-4" />
                     <span>Connection Requests ({pendingRequests.length})</span>
                   </span>
-                  <span className="text-[10px] text-[#00F5A0] font-mono">
+                  <span className="text-[11px] text-[#00F5A0] font-mono font-bold">
                     {showRequestsDrawer ? 'Hide' : 'Review'}
                   </span>
                 </button>
 
                 {showRequestsDrawer && (
-                  <div className="mt-2 space-y-1.5">
+                  <div className="mt-2 space-y-2">
                     {pendingRequests.map((req) => (
                       <div
                         key={req.id}
-                        className="p-2.5 rounded-2xl bg-zinc-900/95 border border-white/10 flex items-center justify-between gap-2"
+                        className="p-3 rounded-2xl bg-[#14151B] border border-white/10 flex items-center justify-between gap-2 shadow-lg"
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="flex items-center gap-3 min-w-0">
                           <img
                             src={req.avatar}
                             alt={req.name}
-                            className="w-9 h-9 rounded-full object-cover border border-[#00F5A0]/40 shrink-0"
+                            className="w-10 h-10 rounded-full object-cover border border-[#00F5A0]/40 shrink-0"
                           />
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
                               <span className="text-xs font-bold text-white truncate">
                                 {req.name}
                               </span>
-                              <span className="text-[9px] font-mono text-[#00F5A0] bg-[#00F5A0]/15 px-1.5 py-0.5 rounded">
+                              <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/15 px-1.5 py-0.5 rounded">
                                 #{req.code}
                               </span>
                             </div>
-                            <p className="text-[10px] text-zinc-400 truncate">{req.via}</p>
+                            <p className="text-[11px] text-zinc-400 truncate mt-0.5">{req.via}</p>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             onClick={() => handleAcceptRequest(req)}
-                            className="px-2.5 py-1 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold text-[10px] cursor-pointer"
+                            className="px-3 py-1.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs cursor-pointer active:scale-95 transition-all shadow-sm"
                           >
                             Accept
                           </button>
                           <button
                             onClick={() => handleIgnoreRequest(req.id)}
-                            className="px-2 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 text-[10px] cursor-pointer"
+                            className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-400 text-xs cursor-pointer active:scale-95 transition-all"
                           >
                             Ignore
                           </button>
@@ -2178,24 +2505,19 @@ export const App: React.FC = () => {
             )}
 
             {/* Conversation List */}
-            <div className="flex-1 overflow-y-auto px-3 space-y-1">
-              {/* Network Discovery when search doesn't match local contacts */}
-              {searchQuery.trim().length >= 3 && !activeContactsList.some(
-                (c) =>
-                  c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  c.code.includes(searchQuery.replace(/\D/g, '')) ||
-                  c.handle.toLowerCase().includes(searchQuery.toLowerCase())
-              ) && (
-                <div className="p-3 my-2 rounded-2xl bg-zinc-900/95 border border-[#00F5A0]/40 shadow-xl flex items-center justify-between gap-3 animate-in fade-in">
-                  <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex-1 overflow-y-auto px-3 space-y-1 relative pb-24">
+              {/* Network Discovery: Connect with PIN or Handle directly from search bar */}
+              {searchQuery.trim().length >= 3 && (
+                <div className="p-3.5 my-2 rounded-2xl bg-[#14151B] border border-[#00F5A0]/40 shadow-xl flex items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div className="w-10 h-10 rounded-full bg-[#00F5A0]/15 border border-[#00F5A0]/40 flex items-center justify-center shrink-0 text-[#00F5A0]">
                       <Sparkles className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs font-bold text-white truncate">
-                        Connect with #{searchQuery.replace(/\D/g, '') || searchQuery}
+                        Connect with {searchQuery.startsWith('@') ? searchQuery : (searchQuery.replace(/\D/g, '').length === 6 ? `PIN #${searchQuery.replace(/\D/g, '')}` : `@${searchQuery}`)}
                       </div>
-                      <p className="text-[10px] text-zinc-400 truncate">
+                      <p className="text-[11px] text-zinc-400 truncate mt-0.5">
                         Direct zero-login stealth tunnel
                       </p>
                     </div>
@@ -2205,7 +2527,7 @@ export const App: React.FC = () => {
                       connectDirectly(searchQuery);
                       setSearchQuery('');
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs shrink-0 cursor-pointer shadow-md shadow-[#00F5A0]/20 flex items-center gap-1"
+                    className="px-3.5 py-2 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs shrink-0 cursor-pointer shadow-md shadow-[#00F5A0]/25 flex items-center gap-1 active:scale-95 transition-all"
                   >
                     <Zap className="w-3.5 h-3.5" />
                     <span>Connect</span>
@@ -2223,71 +2545,104 @@ export const App: React.FC = () => {
                 .map((contact) => {
                   const list = activeChatsMap[contact.id] || [];
                   const last = list[list.length - 1];
+                  const isContactBlocked = blockedUsers.includes(contact.handle.replace(/^@/, '').toLowerCase());
 
                   return (
-                    <button
+                    <div
                       key={contact.id}
-                      onClick={() => {
-                        setActiveContactId(contact.id);
-                        setContacts((prev) =>
-                          prev.map((c) => (c.id === contact.id ? { ...c, unread: 0 } : c))
-                        );
-                        setScreen('chat');
-                      }}
-                      className="w-full p-3 rounded-2xl hover:bg-zinc-900/80 transition-all flex items-center gap-3.5 text-left group cursor-pointer"
+                      className="w-full relative group flex items-center"
                     >
-                      <div className="relative shrink-0">
-                        <img
-                          src={contact.avatar}
-                          alt={contact.name}
-                          className="w-12 h-12 rounded-full object-cover border border-white/10"
-                        />
-                        {contact.online && !ghostMode && (
-                          <span className="w-3 h-3 rounded-full bg-[#00F5A0] border-2 border-[#09090B] absolute bottom-0 right-0" />
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5 truncate">
-                            <span className="font-semibold text-sm text-white truncate">
-                              {contact.name}
-                            </span>
-                            <span className="text-[10px] font-mono text-zinc-400 bg-white/5 px-1.5 py-0.5 rounded-md">
-                              #{contact.code}
-                            </span>
-                          </div>
-                          <span className="text-[11px] text-zinc-500">{contact.time}</span>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-1">
-                          <p className="text-xs text-zinc-400 truncate pr-2">
-                            {last
-                              ? last.shielded
-                                ? '🛡️ Hold-to-Reveal Secret'
-                                : last.text
-                              : 'Tap to start disappearing chat'}
-                          </p>
-
-                          {/* WhatsApp-Style Green Unread Counter */}
-                          {contact.unread > 0 && (
-                            <span className="px-2 py-0.5 rounded-full bg-[#00F5A0] text-zinc-950 font-bold text-[10px] shadow-[0_0_10px_rgba(0,245,160,0.5)]">
-                              {contact.unread}
-                            </span>
+                      <button
+                        onClick={() => {
+                          setActiveContactId(contact.id);
+                          setContacts((prev) =>
+                            prev.map((c) => (c.id === contact.id ? { ...c, unread: 0 } : c))
+                          );
+                          setScreen('chat');
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setActionContact(contact);
+                        }}
+                        className="flex-1 p-3.5 rounded-2xl hover:bg-zinc-900/70 active:scale-[0.99] transition-all flex items-center gap-3.5 text-left cursor-pointer border border-transparent hover:border-white/[0.04]"
+                      >
+                        <div className="relative shrink-0">
+                          {contact.avatar && !contact.avatar.includes('unsplash') ? (
+                            <img
+                              src={contact.avatar}
+                              alt={contact.name}
+                              className="w-12 h-12 rounded-full object-cover border border-white/10 shadow-md"
+                            />
+                          ) : (
+                            <Avatar
+                              avatarId={contact.avatarId || 1}
+                              size="lg"
+                              name={contact.name}
+                              isOnline={contact.online && !ghostMode}
+                            />
+                          )}
+                          {contact.online && !ghostMode && contact.avatar && !contact.avatar.includes('unsplash') && (
+                            <span className="w-3 h-3 rounded-full bg-[#00F5A0] border-2 border-[#07080B] absolute bottom-0 right-0 shadow-[0_0_8px_rgba(0,245,160,0.7)]" />
                           )}
                         </div>
-                      </div>
-                    </button>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 truncate">
+                              <span className="font-bold text-[15px] text-white truncate tracking-tight">
+                                {contact.name}
+                              </span>
+                              {isContactBlocked && (
+                                <span className="text-[10px] font-mono text-rose-400 bg-rose-500/15 border border-rose-500/30 px-1.5 py-0.2 rounded font-bold">
+                                  Blocked
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-zinc-500 font-medium">{contact.time}</span>
+                          </div>
+
+                          <div className="flex items-center justify-between mt-1">
+                            <p className="text-[13px] text-zinc-400 truncate pr-2">
+                              {last
+                                ? last.shielded
+                                  ? '🛡️ Hold-to-Reveal Secret'
+                                  : last.text
+                                : 'Tap to start disappearing chat'}
+                            </p>
+
+                            {/* WhatsApp-Style Green Unread Counter */}
+                            {contact.unread > 0 && (
+                              <span className="px-2 py-0.5 rounded-full bg-[#00F5A0] text-zinc-950 font-extrabold text-[11px] shadow-[0_0_10px_rgba(0,245,160,0.45)]">
+                                {contact.unread}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+
+                      {/* 3-Dot Options Action Trigger */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setActionContact(contact);
+                        }}
+                        className="p-2 mr-1 rounded-xl text-zinc-500 hover:text-white hover:bg-white/5 active:scale-90 transition-all cursor-pointer opacity-70 group-hover:opacity-100"
+                        title="Contact Options"
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </button>
+                    </div>
                   );
                 })}
 
               {/* Empty State when no active contacts */}
               {activeContactsList.length === 0 && (
-                <div className="py-16 px-4 text-center flex flex-col items-center justify-center">
-                  <div className="w-16 h-16 rounded-3xl bg-zinc-900/90 border border-white/10 flex items-center justify-center text-[#00F5A0] mb-4 shadow-[0_0_30px_rgba(0,245,160,0.15)]">
+                <div className="py-20 px-4 text-center flex flex-col items-center justify-center">
+                  <div className="w-16 h-16 rounded-3xl bg-[#14151B] border border-white/10 flex items-center justify-center text-[#00F5A0] mb-4 shadow-[0_0_30px_rgba(0,245,160,0.15)]">
                     <Lock className="w-8 h-8" />
                   </div>
-                  <h3 className="text-base font-bold text-white mb-1.5">No Active Ciphers</h3>
+                  <h3 className="text-base font-bold text-white mb-1.5">No Active Chats</h3>
                   <p className="text-xs text-zinc-400 max-w-xs mb-6 leading-relaxed">
                     All messages vanish automatically on read. Connect with a partner using their 6-digit PIN or scan their QR.
                   </p>
@@ -2313,20 +2668,93 @@ export const App: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Floating Action Button (WhatsApp Style) to Connect Friend */}
+            <button
+              onClick={() => setShowConnectSheet(true)}
+              className="absolute bottom-20 right-5 z-20 w-13 h-13 rounded-full bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 flex items-center justify-center shadow-xl shadow-[#00F5A0]/30 transition-all active:scale-90 cursor-pointer"
+              title="Add Contact / Connect"
+            >
+              <Plus className="w-6 h-6 stroke-[2.5]" />
+            </button>
+          </>
+        ) : activeTab === 'vault' ? (
+          <div className="flex-1 overflow-y-auto">
+            <SecretVaultView
+              currentUser={myFullProfile}
+              onEnterRoom={(room) => {
+                connectDirectly(room.code);
+                setActiveTab('chats');
+              }}
+              onStartChatWithUser={(user) => {
+                connectDirectly(user.handle, user.displayName);
+                setActiveTab('chats');
+              }}
+              onOpenScanner={() => setShowCameraModal(true)}
+            />
           </div>
-        )}
+        ) : activeTab === 'profile' ? (
+          <div className="flex-1 overflow-y-auto">
+            <ProfileView
+              currentUser={myFullProfile}
+              recoveryPin={recoveryPin}
+              onUpdateRecoveryPin={(newPin) => {
+                setRecoveryPin(newPin);
+                localStorage.setItem('blink_recovery_pin', newPin);
+              }}
+              onSave={(updated) => {
+                if (updated.handle) setMyHandle('@' + updated.handle.replace(/^@/, ''));
+                const clean = (updated.handle || myHandle).replace(/^@/, '').toLowerCase();
+                const cleanName = updated.displayName || clean;
+                const p: UserProfile = {
+                  id: myFullProfile.id || ('usr_' + clean),
+                  handle: clean,
+                  displayName: cleanName,
+                  avatarId: updated.avatarId || myFullProfile.avatarId || 1,
+                  vibe: myFullProfile.vibe || '⚡ Stealth mode active',
+                  isAvailable: !ghostMode,
+                  country: 'India',
+                  state: '',
+                  city: 'New Delhi',
+                  lastActive: Date.now(),
+                  pin: myCode.replace(/\D/g, ''),
+                };
+                StorageService.saveProfile(p);
+                NetworkService.syncProfileToSupabase(p).catch(() => {});
+              }}
+              onRegenerateCode={confirmRegenerateCode}
+              onResetAccount={handleResetAccount}
+              ghostMode={ghostMode}
+              onToggleGhost={() => setGhostMode(!ghostMode)}
+              soundMuted={muted}
+              onToggleSound={() => setMuted(!muted)}
+              blockedUsers={blockedUsers}
+              onUnblockUser={handleToggleBlock}
+              onLockApp={() => setIsLocked(true)}
+            />
+          </div>
+        ) : null}
+
+        {/* Bottom Floating Navigation Dock */}
+        <BottomNav
+          activeTab={activeTab}
+          onTabChange={(t) => setActiveTab(t)}
+          unreadCount={contacts.reduce((a, c) => a + (c.unread || 0), 0)}
+        />
+      </div>
+    )}
 
         {/* =========================================================
             VIEW 2: INSIDE A CHAT ROOM (ULTRA-CLEAN NEXT-LEVEL UI)
            ========================================================= */}
         {screen === 'chat' && (
-          <div className="flex-1 flex flex-col overflow-hidden bg-[#09090B] relative">
+          <div className="flex-1 flex flex-col overflow-hidden bg-[#07080B] relative">
             {/* Sleek Glass Header */}
-            <div className="px-3 py-2.5 border-b border-white/[0.07] bg-[#09090B]/85 backdrop-blur-xl flex items-center justify-between z-20">
-              <div className="flex items-center gap-2">
+            <div className="px-3.5 py-3 border-b border-white/[0.06] bg-[#09090B]/90 backdrop-blur-2xl flex items-center justify-between z-20">
+              <div className="flex items-center gap-2.5 min-w-0">
                 <button
                   onClick={() => setScreen('list')}
-                  className="p-1.5 rounded-full hover:bg-white/10 text-zinc-300 transition-colors flex items-center cursor-pointer"
+                  className="p-1.5 rounded-full hover:bg-white/10 text-zinc-300 transition-colors flex items-center cursor-pointer shrink-0"
                 >
                   <ChevronLeft className="w-5 h-5" />
                   {contacts.reduce((sum, c) => sum + (c.unread || 0), 0) > 0 && (
@@ -2334,87 +2762,193 @@ export const App: React.FC = () => {
                   )}
                 </button>
 
-                <div className="relative">
-                  <img
-                    src={activeContact.avatar}
-                    alt={activeContact.name}
-                    className="w-9 h-9 rounded-full object-cover border border-white/10"
-                  />
-                  {activeContact.online && !ghostMode && (
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#00F5A0] border-2 border-[#09090B] absolute bottom-0 right-0" />
+                <div className="relative shrink-0">
+                  {activeContact.avatar && !activeContact.avatar.includes('unsplash') ? (
+                    <img
+                      src={activeContact.avatar}
+                      alt={activeContact.name}
+                      className="w-10 h-10 rounded-full object-cover border border-white/10 shadow-sm"
+                    />
+                  ) : (
+                    <Avatar
+                      avatarId={activeContact.avatarId || 1}
+                      size="md"
+                      name={activeContact.name}
+                      isOnline={activeContact.online && !ghostMode}
+                    />
+                  )}
+                  {activeContact.online && !ghostMode && activeContact.avatar && !activeContact.avatar.includes('unsplash') && (
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#00F5A0] border-2 border-[#09090B] absolute bottom-0 right-0 shadow-[0_0_8px_rgba(0,245,160,0.6)]" />
                   )}
                 </div>
 
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-semibold text-sm text-white leading-none">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-[15px] text-white tracking-tight truncate">
                       {activeContact.name}
                     </span>
-                    <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/15 px-1.5 py-0.5 rounded">
-                      #{activeContact.code}
-                    </span>
                   </div>
-                  <div className="text-[10px] text-zinc-400 mt-0.5 flex items-center gap-1">
+                  <div className="text-[11px] text-zinc-400 mt-0.5 flex items-center gap-1.5">
                     {remoteTyping ? (
-                      <span className="text-fuchsia-400 font-semibold animate-pulse">
-                        ⚡ Streaming encrypted wave...
+                      <span className="text-[#00F5A0] font-semibold flex items-center gap-1">
+                        typing<span className="animate-pulse">...</span>
                       </span>
                     ) : ghostMode ? (
-                      <span className="text-violet-300">👻 Ghost Mode Cloaked</span>
+                      <span className="text-violet-300 font-medium">👻 Ghost Cloaked</span>
                     ) : (
-                      <span className="text-[#00F5A0]">● Timer starts on Seen</span>
+                      <span className="text-zinc-400 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80 inline-block" />
+                        <span>Timer on Seen</span>
+                      </span>
                     )}
                   </div>
                 </div>
               </div>
 
-              {/* Right Header Icons: Screenshot Test, QR/PIN Modal, Disappearing Timer & Panic Burn */}
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={triggerScreenshotBlockedAlert}
-                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-amber-300 transition-all cursor-pointer"
-                  title="Simulate Screenshot Attempt Blocked"
-                >
-                  <ShieldAlert className="w-4 h-4" />
-                </button>
+              {/* Right Header Icons: Disappearing Timer with Dropdown, Panic Burn */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* Original Disappearing Timer Selector with Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowTimerMenu(!showTimerMenu);
+                      audio.play('tap');
+                    }}
+                    className={`px-3 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1.5 shrink-0 transition-all cursor-pointer active:scale-95 ${
+                      timerMode === 'burn'
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-[0_0_12px_rgba(244,63,94,0.3)]'
+                        : 'bg-zinc-900/90 hover:bg-zinc-800 text-[#00F5A0] border border-white/10 shadow-sm'
+                    }`}
+                    title="Self-Destruct Disappearing Timer"
+                  >
+                    {timerMode === 'burn' ? (
+                      <Flame className="w-3.5 h-3.5 text-rose-400" />
+                    ) : (
+                      <Clock className="w-3.5 h-3.5 text-[#00F5A0]" />
+                    )}
+                    <span className="font-mono">{timerMode === 'burn' ? 'Burn' : timerMode}</span>
+                  </button>
+
+                  {/* Header Timer Dropdown */}
+                  {showTimerMenu && (
+                    <div className="absolute right-0 top-11 w-44 rounded-2xl bg-[#14151B] border border-white/15 shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 backdrop-blur-xl">
+                      {[
+                        { id: 'burn', label: '🔥 Burn on Read' },
+                        { id: '10s', label: '10 seconds' },
+                        { id: '30s', label: '30 seconds' },
+                        { id: '60s', label: '1 minute' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => {
+                            setTimerMode(opt.id as any);
+                            setShowTimerMenu(false);
+                            audio.play('tap');
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                            timerMode === opt.id
+                              ? 'bg-white/10 text-[#00F5A0] font-bold'
+                              : 'text-zinc-300 hover:bg-white/5'
+                          }`}
+                        >
+                          <span>{opt.label}</span>
+                          {timerMode === opt.id && (
+                            <Check className="w-3.5 h-3.5 text-[#00F5A0]" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 <button
                   onClick={() => {
-                    setPopoverTab('qr');
-                    setShowQrPinPopover(true);
+                    setShowPanicPopover(!showPanicPopover);
+                    audio.play('tap');
                   }}
-                  className="p-2 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-zinc-300 transition-all cursor-pointer"
-                  title="My Code, QR & 4-Digit PIN"
-                >
-                  <QrCode className="w-4 h-4 text-[#00F5A0]" />
-                </button>
-
-                <button
-                  onClick={() => setShowTimerMenu(!showTimerMenu)}
-                  className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0 transition-all cursor-pointer ${
-                    timerMode === 'burn'
-                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                      : 'bg-zinc-900 hover:bg-zinc-800 text-[#00F5A0] border border-white/10'
-                  }`}
-                  title="Disappearing Timer"
-                >
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>{timerMode === 'burn' ? 'Burn' : timerMode}</span>
-                </button>
-
-                <button
-                  onClick={() => setShowPanicPopover(!showPanicPopover)}
-                  className="p-2 rounded-full bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 transition-all cursor-pointer"
+                  className="p-2 rounded-full bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 transition-all cursor-pointer active:scale-95 shadow-sm"
                   title="Panic Button: Burn Chat"
                 >
                   <Flame className="w-4 h-4" />
                 </button>
+
+                {/* 3-Dot Options Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      setShowChatOptions(!showChatOptions);
+                      audio.play('tap');
+                    }}
+                    className="p-2 rounded-full bg-zinc-900/90 hover:bg-zinc-800 border border-white/10 text-zinc-300 hover:text-white transition-all cursor-pointer active:scale-95 shadow-sm"
+                    title="Chat Options"
+                  >
+                    <MoreVertical className="w-4 h-4" />
+                  </button>
+
+                  {showChatOptions && (
+                    <div className="absolute right-0 top-11 w-48 rounded-2xl bg-[#14151B] border border-white/15 shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95 backdrop-blur-xl space-y-1">
+                      <button
+                        onClick={() => {
+                          handleClearChatHistory(activeContact.id);
+                          setShowChatOptions(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl text-xs flex items-center gap-2 text-zinc-300 hover:bg-white/5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Clear Messages</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleToggleBlock(activeContact.handle);
+                          setShowChatOptions(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl text-xs flex items-center gap-2 text-zinc-300 hover:bg-white/5 cursor-pointer"
+                      >
+                        <Ban className="w-3.5 h-3.5 text-rose-400" />
+                        <span>
+                          {blockedUsers.includes(activeContact.handle.replace(/^@/, '').toLowerCase())
+                            ? 'Unblock User'
+                            : 'Block User'}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          handleRemoveContact(activeContact.id);
+                          setShowChatOptions(false);
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl text-xs flex items-center gap-2 text-rose-300 hover:bg-rose-500/10 cursor-pointer"
+                      >
+                        <UserMinus className="w-3.5 h-3.5 text-rose-400" />
+                        <span>Delete Contact</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
+            {/* Blocked Contact Warning Banner */}
+            {blockedUsers.includes(activeContact.handle.replace(/^@/, '').toLowerCase()) && (
+              <div className="mx-4 mt-2 p-2.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center justify-between shadow-lg">
+                <span className="flex items-center gap-2">
+                  <Ban className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>You have blocked this contact.</span>
+                </span>
+                <button
+                  onClick={() => handleToggleBlock(activeContact.handle)}
+                  className="px-2.5 py-1 rounded-xl bg-rose-500/30 hover:bg-rose-500/40 text-rose-100 font-bold text-[11px] cursor-pointer"
+                >
+                  Unblock
+                </button>
+              </div>
+            )}
+
             {/* Realtime Screenshot Detection Warning Banner */}
             {screenshotToast && (
-              <div className="absolute top-14 left-4 right-4 z-40 p-2.5 rounded-2xl bg-rose-950/95 border border-rose-500/50 backdrop-blur-2xl text-rose-200 text-xs font-mono text-center shadow-2xl flex items-center justify-center gap-2 animate-in fade-in slide-in-from-top-2">
+              <div className="absolute top-16 left-4 right-4 z-40 p-2.5 rounded-2xl bg-rose-950/95 border border-rose-500/50 backdrop-blur-2xl text-rose-200 text-xs font-mono text-center shadow-2xl flex items-center justify-center gap-2 animate-in fade-in slide-in-from-top-2">
                 <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
                 <span>{screenshotToast}</span>
               </div>
@@ -2422,24 +2956,24 @@ export const App: React.FC = () => {
 
             {/* Sleek Panic Confirmation Popover */}
             {showPanicPopover && (
-              <div className="absolute top-14 right-4 z-40 w-60 bg-zinc-900/95 border border-rose-500/40 backdrop-blur-2xl p-3.5 rounded-2xl shadow-2xl">
-                <div className="text-xs font-bold text-white flex items-center gap-1.5 mb-1">
+              <div className="absolute top-16 right-4 z-40 w-64 bg-[#14151B]/95 border border-rose-500/40 backdrop-blur-2xl p-4 rounded-3xl shadow-2xl space-y-2">
+                <div className="text-xs font-bold text-white flex items-center gap-2">
                   <Flame className="w-4 h-4 text-rose-400" />
                   <span>Burn Entire Conversation?</span>
                 </div>
-                <p className="text-[11px] text-zinc-400 mb-3">
-                  Wipes all messages on both phones in 450ms smoke with zero recovery.
+                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                  Permanently vaporizes all messages on both devices in a 450ms smoke wave with zero cloud traces.
                 </p>
-                <div className="flex gap-2">
+                <div className="flex gap-2 pt-1">
                   <button
                     onClick={handlePanicBurn}
-                    className="flex-1 py-1.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/30 cursor-pointer"
+                    className="flex-1 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/30 cursor-pointer active:scale-95 transition-all"
                   >
                     Burn Now
                   </button>
                   <button
                     onClick={() => setShowPanicPopover(false)}
-                    className="px-3 py-1.5 rounded-xl bg-white/5 text-zinc-300 text-xs cursor-pointer"
+                    className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 text-xs cursor-pointer active:scale-95 transition-all"
                   >
                     Cancel
                   </button>
@@ -2450,23 +2984,23 @@ export const App: React.FC = () => {
             {/* =========================================================
                 MESSAGE STREAM (SLEEK GLASS BUBBLES + SVG RINGS)
                ========================================================= */}
-            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+            <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
               {/* Subtle Encryption Pill */}
               <div className="text-center my-1">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900/90 border border-white/[0.06] text-[10px] text-zinc-400">
-                  <Sparkles className="w-3 h-3 text-[#00F5A0]" />
-                  <span>Zero-Login Tunnel • Double-tap message to React</span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-900/80 border border-white/[0.07] text-[11px] text-zinc-400 shadow-sm">
+                  <Shield className="w-3 h-3 text-[#00F5A0]" />
+                  <span>End-to-End Encrypted • Zero Cloud Traces</span>
                 </span>
               </div>
 
               {currentMessages.length === 0 && (
-                <div className="h-60 flex flex-col items-center justify-center text-center px-6">
-                  <div className="w-12 h-12 rounded-full bg-zinc-900 border border-white/10 flex items-center justify-center text-zinc-500 mb-2">
-                    <Flame className="w-5 h-5 text-rose-400/60" />
+                <div className="h-64 flex flex-col items-center justify-center text-center px-6">
+                  <div className="w-14 h-14 rounded-3xl bg-zinc-900/80 border border-white/10 flex items-center justify-center text-zinc-500 mb-3 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+                    <Flame className="w-6 h-6 text-[#00F5A0]/80" />
                   </div>
-                  <p className="text-xs font-medium text-zinc-300">No trace left behind</p>
-                  <p className="text-[11px] text-zinc-500 mt-0.5">
-                    Messages vaporize automatically after your partner reads them.
+                  <p className="text-sm font-semibold text-zinc-200">No trace left behind</p>
+                  <p className="text-xs text-zinc-500 mt-1 max-w-[220px] leading-relaxed">
+                    Messages self-destruct automatically after your partner reads them.
                   </p>
                 </div>
               )}
@@ -2475,8 +3009,8 @@ export const App: React.FC = () => {
                 // SYSTEM SCREENSHOT BLOCKED EVENT PILL
                 if (msg.type === 'screenshot_alert') {
                   return (
-                    <div key={msg.id} className="flex justify-center my-1.5">
-                      <div className="px-3 py-1.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-[10.5px] text-rose-300 font-medium flex items-center gap-1.5 shadow-lg">
+                    <div key={msg.id} className="flex justify-center my-2">
+                      <div className="px-3.5 py-1.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-[11px] text-rose-300 font-medium flex items-center gap-1.5 shadow-lg">
                         <span>{msg.text}</span>
                       </div>
                     </div>
@@ -2486,7 +3020,7 @@ export const App: React.FC = () => {
                 const isMe = msg.sender === 'me';
                 const isRevealed = !!revealedIds[msg.id];
                 const isBlurred = msg.shielded && !isRevealed;
-                const radius = 8;
+                const radius = 9;
                 const circumference = 2 * Math.PI * radius;
                 const dashOffset =
                   circumference -
@@ -2502,15 +3036,15 @@ export const App: React.FC = () => {
                     {/* Quick Reaction Picker Bar (Appears on Double-Click or React Button) */}
                     {activeReactionMsgId === msg.id && (
                       <div
-                        className={`mb-1 z-30 flex items-center gap-1 bg-zinc-900/95 border border-white/15 px-2 py-1 rounded-full shadow-xl ${
+                        className={`mb-1.5 z-30 flex items-center gap-1.5 bg-[#14151B]/95 border border-white/15 px-2.5 py-1 rounded-full shadow-2xl backdrop-blur-xl animate-in zoom-in-95 ${
                           isMe ? ' self-end' : 'self-start'
                         }`}
                       >
-                        {['❤️', '🔥', '👀', '⚡'].map((emoji) => (
+                        {['❤️', '🔥', '👀', '⚡', '🤫'].map((emoji) => (
                           <button
                             key={emoji}
                             onClick={() => handleReaction(msg.id, emoji)}
-                            className="hover:scale-125 transition-transform text-xs px-1 cursor-pointer"
+                            className="hover:scale-125 transition-transform text-sm px-1 cursor-pointer active:scale-95"
                           >
                             {emoji}
                           </button>
@@ -2518,7 +3052,7 @@ export const App: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="flex items-center gap-1.5 max-w-[85%]">
+                    <div className="flex items-center gap-2 max-w-[85%]">
                       {/* Reply & React Quick Action Icons (Left side for my messages) */}
                       {isMe && (
                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
@@ -2528,7 +3062,7 @@ export const App: React.FC = () => {
                                 activeReactionMsgId === msg.id ? null : msg.id
                               )
                             }
-                            className="p-1 rounded-full bg-zinc-900 border border-white/10 text-[10px] cursor-pointer"
+                            className="p-1.5 rounded-full bg-zinc-900 border border-white/10 text-zinc-400 hover:text-white text-[11px] cursor-pointer"
                             title="React"
                           >
                             🔥
@@ -2538,10 +3072,10 @@ export const App: React.FC = () => {
                               setReplyingTo(msg);
                               audio.play('tap');
                             }}
-                            className="p-1 rounded-full bg-zinc-900 border border-white/10 text-zinc-400 hover:text-white cursor-pointer"
+                            className="p-1.5 rounded-full bg-zinc-900 border border-white/10 text-zinc-400 hover:text-white cursor-pointer"
                             title="Reply"
                           >
-                            <CornerUpLeft className="w-3 h-3" />
+                            <CornerUpLeft className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       )}
@@ -2554,14 +3088,14 @@ export const App: React.FC = () => {
                         onMouseUp={() => msg.shielded && handleHoldEnd(msg)}
                         onTouchStart={() => msg.shielded && handleHoldStart(msg)}
                         onTouchEnd={() => msg.shielded && handleHoldEnd(msg)}
-                        className={`relative rounded-2xl ${
-                          isMe ? 'rounded-br-xs' : 'rounded-bl-xs'
+                        className={`relative rounded-[18px] ${
+                          isMe ? 'rounded-br-[4px]' : 'rounded-bl-[4px]'
                         } px-3.5 py-2 transition-all cursor-pointer ${
                           isMe
                             ? msg.whisperEffect
-                              ? 'bg-gradient-to-r from-fuchsia-700 via-purple-700 to-indigo-700 text-white shadow-lg'
-                              : 'bg-[#005c4b] text-white shadow-md'
-                            : 'bg-[#1e1e24] border border-white/10 text-zinc-100 shadow-md'
+                              ? 'bg-gradient-to-r from-fuchsia-700 via-purple-700 to-indigo-700 text-white shadow-md border border-fuchsia-500/30'
+                              : 'bg-[#0B3A27] border border-[#00F5A0]/35 text-white shadow-md shadow-emerald-950/40'
+                            : 'bg-[#181920] border border-white/[0.09] text-zinc-100 shadow-md shadow-black/50'
                         }`}
                       >
                         {/* Quoted Reply Header */}
@@ -2585,16 +3119,16 @@ export const App: React.FC = () => {
                         {msg.type === 'text' && (
                           <div className="relative">
                             <p
-                              className={`text-[13px] leading-relaxed transition-all duration-200 ${
-                                isBlurred ? 'filter blur-[5px] opacity-30 select-none' : 'filter-none opacity-100'
+                              className={`text-[14px] leading-snug transition-all duration-200 ${
+                                isBlurred ? 'filter blur-[6px] opacity-25 select-none' : 'filter-none opacity-100'
                               }`}
                             >
                               {msg.text}
                             </p>
                             {isBlurred && (
                               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                <span className="text-[10px] font-semibold text-emerald-200 bg-black/60 px-2 py-0.5 rounded-full flex items-center gap-1 backdrop-blur-sm border border-emerald-500/20">
-                                  <Fingerprint className="w-3 h-3 text-[#00F5A0]" />
+                                <span className="text-[11px] font-semibold text-emerald-200 bg-black/75 px-2.5 py-1 rounded-full flex items-center gap-1.5 backdrop-blur-md border border-emerald-500/30 shadow-lg">
+                                  <Fingerprint className="w-3.5 h-3.5 text-[#00F5A0]" />
                                   Hold to Reveal
                                 </span>
                               </div>
@@ -2690,44 +3224,30 @@ export const App: React.FC = () => {
                           </button>
                         )}
 
-                        {/* BOTTOM META ROW: TIME + SEEN-TRIGGERED CIRCULAR RING */}
-                        <div className="flex items-center justify-end gap-1.5 mt-1 text-[9px] opacity-80">
+                        {/* BOTTOM META ROW: COMPACT TIME + WHATSAPP-STYLE TICKS & SLEEK COUNTDOWN */}
+                        <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] text-zinc-400 font-medium select-none">
                           <span>{msg.time}</span>
 
-                          {!msg.seen ? (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); markMessageSeen(activeContactId, msg.id); }}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/30 hover:bg-black/50 text-amber-300 font-medium transition-all cursor-pointer"
-                              title="Tap to simulate Receiver reading this message"
-                            >
-                              <Clock className="w-2.5 h-2.5" />
-                              <span>Waiting for Seen</span>
-                            </button>
-                          ) : (
-                            <div className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-black/30 text-[#00F5A0] font-mono font-bold">
-                              <svg className="w-3 h-3 -rotate-90" viewBox="0 0 20 20">
-                                <circle
-                                  cx="10"
-                                  cy="10"
-                                  r={radius}
-                                  stroke="rgba(255,255,255,0.2)"
-                                  strokeWidth="2.2"
-                                  fill="none"
-                                />
-                                <circle
-                                  cx="10"
-                                  cy="10"
-                                  r={radius}
-                                  stroke="#00F5A0"
-                                  strokeWidth="2.2"
-                                  strokeDasharray={circumference}
-                                  strokeDashoffset={dashOffset}
-                                  strokeLinecap="round"
-                                  fill="none"
-                                />
-                              </svg>
-                              <span>{msg.remainingSeconds}s</span>
-                            </div>
+                          {isMe && (
+                            msg.status === 'read' ? (
+                              <span title="Read by peer" className="inline-flex items-center text-[#00F5A0]">
+                                <CheckCheck className="w-3.5 h-3.5" />
+                              </span>
+                            ) : msg.status === 'delivered' ? (
+                              <span title="Delivered to device" className="inline-flex items-center text-zinc-400">
+                                <CheckCheck className="w-3.5 h-3.5" />
+                              </span>
+                            ) : (
+                              <span title="Sent" className="inline-flex items-center text-zinc-500">
+                                <Check className="w-3 h-3" />
+                              </span>
+                            )
+                          )}
+
+                          {msg.seen && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-black/50 text-[#00F5A0] font-mono text-[9.5px] font-bold border border-[#00F5A0]/25 shadow-sm">
+                              ⏱ {msg.remainingSeconds}s
+                            </span>
                           )}
                         </div>
 
@@ -2777,22 +3297,16 @@ export const App: React.FC = () => {
               })}
 
               {/* =========================================================
-                  LIQUID WAVE REMOTE TYPING BUBBLE (WHEN ARIA IS TYPING)
+                  CLEAN CLASSIC REMOTE TYPING BUBBLE
                  ========================================================= */}
               {remoteTyping && (
-                <div className="flex items-start gap-2 animate-in fade-in slide-in-from-bottom-2">
-                  <div className="px-3.5 py-2.5 rounded-[22px] rounded-bl-md bg-[#18181D] border border-fuchsia-500/30 shadow-[0_0_20px_rgba(217,70,239,0.18)] flex items-center gap-2.5">
-                    <div className="flex items-center gap-1 h-3.5">
-                      {[45, 95, 60, 100, 50, 85].map((h, idx) => (
-                        <span
-                          key={idx}
-                          style={{ height: `${h}%`, animationDelay: `${idx * 110}ms` }}
-                          className="w-1 rounded-full bg-gradient-to-t from-[#00F5A0] via-fuchsia-400 to-emerald-300 animate-bounce"
-                        />
-                      ))}
-                    </div>
-                    <span className="text-[10px] font-mono text-fuchsia-300">
-                      {activeContact.name.split(' ')[0]} crafting cipher...
+                <div className="flex items-center gap-2 pl-1 py-1 animate-in fade-in slide-in-from-bottom-1">
+                  <div className="px-3.5 py-2 rounded-2xl rounded-bl-xs bg-[#1a1c24] border border-white/10 flex items-center gap-1.5 shadow-md">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00F5A0] animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00F5A0] animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00F5A0] animate-bounce" />
+                    <span className="text-[12px] text-zinc-300 font-medium ml-1">
+                      {activeContact.name.split(' ')[0]} is typing...
                     </span>
                   </div>
                 </div>
@@ -2804,15 +3318,15 @@ export const App: React.FC = () => {
             {/* =========================================================
                 NEXT-LEVEL FLOATING LIQUID-GLASS AURORA COMPOSER
                ========================================================= */}
-            <div className="p-3 pt-1 bg-gradient-to-t from-[#09090B] via-[#09090B] to-transparent relative z-20">
+            <div className="p-3 pt-1.5 bg-gradient-to-t from-[#07080B] via-[#07080B] to-transparent relative z-20">
               {/* 2. REPLY-TO-MESSAGE PREVIEW BAR */}
               {replyingTo && (
-                <div className="mb-1.5 px-3 py-1.5 rounded-2xl bg-zinc-900/95 border border-[#00F5A0]/30 flex items-center justify-between text-xs">
+                <div className="mb-2 px-3.5 py-2 rounded-2xl bg-[#14151B]/95 border border-[#00F5A0]/30 flex items-center justify-between text-xs backdrop-blur-xl shadow-xl">
                   <div className="truncate pr-2">
                     <span className="text-[10px] font-bold text-[#00F5A0] block">
                       Replying to {replyingTo.sender === 'me' ? 'Yourself' : activeContact.name}
                     </span>
-                    <span className="text-[11px] text-zinc-300 truncate block">
+                    <span className="text-[12px] text-zinc-300 truncate block">
                       {replyingTo.shielded ? '🛡️ Blurred Secret Message' : replyingTo.text}
                     </span>
                   </div>
@@ -2825,40 +3339,9 @@ export const App: React.FC = () => {
                 </div>
               )}
 
-              {/* 3. FLOATING SPEED-DIAL TIMER MENU */}
-              {showTimerMenu && (
-                <div className="absolute bottom-16 left-4 z-30 bg-zinc-900/95 border border-white/15 backdrop-blur-2xl p-1.5 rounded-2xl shadow-2xl flex items-center gap-1">
-                  {[
-                    { id: '10s', label: '10s' },
-                    { id: '30s', label: '30s' },
-                    { id: '60s', label: '60s' },
-                    { id: 'burn', label: '🔥 Burn on Read' },
-                  ].map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => {
-                        setTimerMode(t.id as '10s' | '30s' | '60s' | 'burn');
-                        setShowTimerMenu(false);
-                        audio.play('tap');
-                      }}
-                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                        timerMode === t.id
-                          ? t.id === 'burn'
-                            ? 'bg-rose-500 text-white'
-                            : 'bg-[#00F5A0] text-black font-bold'
-                          : 'text-zinc-400 hover:text-white'
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-
               {/* 4. HOLD-TO-SEND / SEND EFFECT POPUP */}
               {showSendEffectMenu && (
-                <div className="absolute bottom-16 right-4 z-30 w-52 bg-zinc-900/95 border border-[#00F5A0]/40 backdrop-blur-2xl p-2 rounded-2xl shadow-2xl space-y-1">
+                <div className="absolute bottom-16 right-4 z-30 w-52 bg-[#14151B]/95 border border-[#00F5A0]/40 backdrop-blur-2xl p-2 rounded-2xl shadow-2xl space-y-1">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 px-2 py-0.5 flex items-center justify-between">
                     <span>Send with Effect</span>
                     <button onClick={() => setShowSendEffectMenu(false)} className="cursor-pointer">
@@ -2892,22 +3375,9 @@ export const App: React.FC = () => {
                 </div>
               )}
 
-              {/* Live Token / Physics Indicator While Typing */}
-              {messageText.length > 0 && (
-                <div className="flex items-center justify-between px-3 pb-1 text-[10px] font-mono text-[#00F5A0]/90">
-                  <span className="flex items-center gap-1">
-                    <Wand2 className="w-3 h-3 text-[#00F5A0]" />
-                    <span>AES-256 Stream • Hold ↑ for Effects</span>
-                  </span>
-                  <span>
-                    {messageText.length} chars • {timerMode === 'burn' ? '🔥 Instant' : timerMode}
-                  </span>
-                </div>
-              )}
-
               {/* Aurora Halo Wrapper */}
               <div
-                className={`p-[1.5px] rounded-[26px] transition-all duration-300 ${
+                className={`p-[1.5px] rounded-[28px] transition-all duration-300 ${
                   typingPulse > 0 || isRecording
                     ? 'aurora-border shadow-[0_0_28px_rgba(0,245,160,0.4)]'
                     : 'bg-white/10'
@@ -2915,23 +3385,8 @@ export const App: React.FC = () => {
               >
                 <form
                   onSubmit={(e) => handleSend(e)}
-                  className="bg-[#121216] rounded-[25px] px-2.5 py-1.5 flex items-center gap-1.5"
+                  className="bg-[#121217] rounded-[27px] px-3 py-1.5 flex items-center gap-2 shadow-xl"
                 >
-                  {/* Compact Timer Speed-Dial Pill */}
-                  <button
-                    type="button"
-                    onClick={() => setShowTimerMenu(!showTimerMenu)}
-                    className={`px-2.5 py-1.5 rounded-full text-[11px] font-bold flex items-center gap-1 shrink-0 transition-all cursor-pointer ${
-                      timerMode === 'burn'
-                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                        : 'bg-zinc-800 hover:bg-zinc-700 text-[#00F5A0] border border-white/5'
-                    }`}
-                    title="Auto-Delete Timer (Starts on Seen)"
-                  >
-                    <Clock className="w-3 h-3" />
-                    <span>{timerMode === 'burn' ? 'Burn' : timerMode}</span>
-                  </button>
-
                   {/* Hold-to-Reveal Fingerprint Shield Toggle */}
                   <button
                     type="button"
@@ -2939,10 +3394,10 @@ export const App: React.FC = () => {
                       setShieldMode(!shieldMode);
                       audio.play('tap');
                     }}
-                    className={`p-2 rounded-full transition-all shrink-0 cursor-pointer ${
+                    className={`p-2 rounded-full transition-all shrink-0 cursor-pointer active:scale-95 ${
                       shieldMode
-                        ? 'bg-[#00F5A0]/25 text-[#00F5A0] border border-[#00F5A0]/40'
-                        : 'text-zinc-400 hover:text-zinc-200'
+                        ? 'bg-[#00F5A0]/25 text-[#00F5A0] border border-[#00F5A0]/40 shadow-[0_0_10px_rgba(0,245,160,0.3)]'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
                     }`}
                     title="Hold-to-Reveal Fingerprint Shield"
                   >
@@ -2969,7 +3424,7 @@ export const App: React.FC = () => {
                       placeholder={
                         shieldMode ? 'Shielded secret message...' : 'Stealth message...'
                       }
-                      className="flex-1 bg-transparent text-[13px] text-white placeholder-zinc-500 focus:outline-none px-1 min-w-0"
+                      className="flex-1 bg-transparent text-[14px] text-white placeholder-zinc-500 focus:outline-none px-1 min-w-0"
                     />
                   ) : (
                     <div className="flex-1 flex items-center justify-between px-2 py-0.5 text-xs">
@@ -2989,19 +3444,19 @@ export const App: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => setIsRecording(false)}
+                          onClick={handleCancelVoiceRecord}
                           className="p-1 text-zinc-400 hover:text-rose-400 cursor-pointer"
                           title="Cancel Recording"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                         <button
                           type="button"
                           onClick={handleSendVoice}
-                          className="px-2.5 py-1 rounded-full bg-[#00F5A0] text-zinc-950 font-bold text-[10px] cursor-pointer"
+                          className="px-3 py-1 rounded-full bg-[#00F5A0] text-zinc-950 font-bold text-[11px] cursor-pointer active:scale-95 transition-all shadow-md"
                         >
                           Send 1x
                         </button>
@@ -3009,9 +3464,17 @@ export const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Secret Photo from Gallery & Voice Recording Buttons */}
+                  {/* Secret Photo (Camera & Gallery) & Voice Recording Buttons */}
                   {!messageText.trim() && !isRecording && (
-                    <>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <input
+                        type="file"
+                        ref={cameraInputRef}
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={handleGalleryPhotoSelect}
+                      />
                       <input
                         type="file"
                         ref={galleryInputRef}
@@ -3022,26 +3485,34 @@ export const App: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => {
+                          cameraInputRef.current?.click();
+                          audio.play('tap');
+                        }}
+                        className="p-2 rounded-full text-zinc-400 hover:text-[#00F5A0] hover:bg-white/5 transition-all cursor-pointer active:scale-95"
+                        title="Take Snap with Camera"
+                      >
+                        <Camera className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
                           galleryInputRef.current?.click();
                           audio.play('tap');
                         }}
-                        className="p-2 rounded-full text-zinc-400 hover:text-[#00F5A0] transition-colors shrink-0 cursor-pointer"
+                        className="p-2 rounded-full text-zinc-400 hover:text-[#00F5A0] hover:bg-white/5 transition-all cursor-pointer active:scale-95"
                         title="Send Photo from Gallery"
                       >
                         <ImageIcon className="w-4 h-4" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          setIsRecording(true);
-                          audio.play('tap');
-                        }}
-                        className="p-2 rounded-full text-zinc-400 hover:text-rose-400 transition-colors shrink-0 cursor-pointer"
+                        onClick={handleStartVoiceRecord}
+                        className="p-2 rounded-full text-zinc-400 hover:text-rose-400 hover:bg-white/5 transition-all cursor-pointer active:scale-95"
                         title="Record Listen-Once Voice Note"
                       >
                         <Mic className="w-4 h-4" />
                       </button>
-                    </>
+                    </div>
                   )}
 
                   {/* Crisp Send Button */}
@@ -3090,56 +3561,58 @@ export const App: React.FC = () => {
             COMPACT QR & 4-DIGIT RECOVERY PIN POPOVER MODAL
            ========================================================= */}
         {showQrPinPopover && (
-          <div className="absolute inset-0 z-40 bg-black/70 backdrop-blur-md flex items-center justify-center p-5">
-            <div className="w-full max-w-[320px] bg-[#141419] border border-white/15 rounded-3xl p-4 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+          <div className="absolute inset-0 z-40 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="w-full max-w-[340px] bg-[#14151B]/95 border border-white/15 rounded-3xl p-5 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150 backdrop-blur-2xl">
               <button
                 onClick={() => setShowQrPinPopover(false)}
-                className="absolute top-3.5 right-3.5 p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer"
+                className="absolute top-4 right-4 p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer active:scale-90 transition-all"
               >
                 <X className="w-4 h-4" />
               </button>
 
-              <div className="text-xs font-bold text-white mb-3 flex items-center gap-1.5">
+              <div className="text-xs font-bold text-white mb-3.5 flex items-center gap-2">
                 <QrCode className="w-4 h-4 text-[#00F5A0]" />
-                <span>Stealth Identity & 4-Digit PIN</span>
+                <span>Stealth Identity & App PIN</span>
               </div>
 
               {/* Sleek Segmented Control */}
-              <div className="grid grid-cols-3 gap-1 bg-zinc-900 p-1 rounded-xl mb-4 text-[11px] font-semibold">
+              <div className="grid grid-cols-3 gap-1 bg-black/60 p-1 rounded-2xl mb-4 text-[11px] font-semibold border border-white/10">
                 <button
                   onClick={() => setPopoverTab('qr')}
-                  className={`py-1.5 rounded-lg transition-all cursor-pointer ${
-                    popoverTab === 'qr' ? 'bg-[#00F5A0] text-black font-bold' : 'text-zinc-400'
+                  className={`py-1.5 rounded-xl transition-all cursor-pointer ${
+                    popoverTab === 'qr' ? 'bg-[#00F5A0] text-black font-extrabold shadow-sm' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
                   My Code
                 </button>
                 <button
-                  onClick={() => setPopoverTab('scan')}
-                  className={`py-1.5 rounded-lg transition-all cursor-pointer ${
-                    popoverTab === 'scan' ? 'bg-[#00F5A0] text-black font-bold' : 'text-zinc-400'
+                  onClick={() => setPopoverTab('connect')}
+                  className={`py-1.5 rounded-xl transition-all cursor-pointer ${
+                    popoverTab === 'connect' ? 'bg-[#00F5A0] text-black font-extrabold shadow-sm' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
-                  Scan QR
+                  Connect
                 </button>
                 <button
                   onClick={() => setPopoverTab('pin')}
-                  className={`py-1.5 rounded-lg transition-all cursor-pointer ${
-                    popoverTab === 'pin' ? 'bg-[#00F5A0] text-black font-bold' : 'text-zinc-400'
+                  className={`py-1.5 rounded-xl transition-all cursor-pointer ${
+                    popoverTab === 'pin' ? 'bg-[#00F5A0] text-black font-extrabold shadow-sm' : 'text-zinc-400 hover:text-white'
                   }`}
                 >
-                  4-Digit PIN
+                  App PIN
                 </button>
               </div>
 
               {/* TAB 1: MY 6-DIGIT CODE & QR */}
               {popoverTab === 'qr' && (
                 <div className="text-center space-y-3">
-                  <div className="w-40 h-40 mx-auto p-2 rounded-2xl bg-black border-2 border-[#00F5A0]/40 flex items-center justify-center shadow-lg shadow-[#00F5A0]/15 relative overflow-hidden">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=blinkmsg://connect?code=${myCode.replace(/\D/g, '')}&color=00F5A0&bgcolor=000000`}
-                      alt="Real Scannable QR Code"
-                      className="w-full h-full object-contain rounded-xl"
+                  <div className="w-44 h-44 mx-auto p-3.5 rounded-3xl bg-white flex items-center justify-center shadow-2xl shadow-[#00F5A0]/20 relative">
+                    <QRCodeSVG
+                      value={`blinkmsg://connect?code=${myCode.replace(/\D/g, '')}`}
+                      size={148}
+                      bgColor="#ffffff"
+                      fgColor="#09090b"
+                      level="Q"
                     />
                   </div>
 
@@ -3177,39 +3650,74 @@ export const App: React.FC = () => {
                 </div>
               )}
 
-              {/* TAB 2: QR SCANNER */}
-              {popoverTab === 'scan' && (
-                <div className="text-center space-y-3">
-                  <div className="h-36 rounded-2xl bg-black border border-[#00F5A0]/40 flex flex-col items-center justify-center relative overflow-hidden">
-                    <div className="w-24 h-24 border-2 border-[#00F5A0] rounded-xl flex items-center justify-center">
-                      <div className="w-full h-0.5 bg-[#00F5A0] animate-bounce" />
-                    </div>
-                    <span className="text-[10px] text-zinc-400 mt-2">
-                      Align friend's QR code inside frame
+              {/* TAB 2: CONNECT BY PIN OR SCAN FRIEND'S QR */}
+              {popoverTab === 'connect' && (
+                <div className="space-y-3.5">
+                  <div>
+                    <label className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 block mb-1.5">
+                      Enter Friend's 6-Digit PIN or @Handle
+                    </label>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (connectCodeInput.trim()) {
+                          setShowQrPinPopover(false);
+                          handleConnectFriend(e);
+                        }
+                      }}
+                      className="space-y-2.5"
+                    >
+                      <div className="flex items-center gap-2 bg-black/60 border border-white/15 focus-within:border-[#00F5A0] rounded-xl px-3 py-2.5 transition-colors">
+                        <KeyRound className="w-4 h-4 text-[#00F5A0] shrink-0" />
+                        <input
+                          type="text"
+                          value={connectCodeInput}
+                          onChange={(e) => setConnectCodeInput(e.target.value)}
+                          placeholder="e.g. 768049 or @alex"
+                          className="flex-1 bg-transparent text-sm text-white placeholder-zinc-500 font-mono tracking-wider focus:outline-none"
+                          autoFocus
+                        />
+                      </div>
+
+                      {searchTargetProfile && (
+                        <div className="p-2 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/30 flex items-center justify-between text-xs">
+                          <span className="font-bold text-[#00F5A0]">
+                            Found: {searchTargetProfile.displayName || searchTargetProfile.handle}
+                          </span>
+                          <span className="text-[10px] text-zinc-400 font-mono">Verified</span>
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={!connectCodeInput.trim()}
+                        className="w-full py-2.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-bold text-xs cursor-pointer shadow-lg shadow-[#00F5A0]/20 flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <UserPlus className="w-3.5 h-3.5" />
+                        <span>Connect to Chat</span>
+                      </button>
+                    </form>
+                  </div>
+
+                  <div className="relative flex items-center justify-center py-1">
+                    <div className="border-t border-white/10 w-full" />
+                    <span className="bg-[#141419] px-2 text-[10px] text-zinc-500 uppercase font-mono absolute">
+                      or
                     </span>
                   </div>
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => {
-                        setShowQrPinPopover(false);
-                        setShowCameraModal(true);
-                      }}
-                      className="w-full py-2.5 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs cursor-pointer shadow-lg flex items-center justify-center gap-1.5"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Open Live Camera Scanner</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowQrPinPopover(false);
-                        connectDirectly('768049', 'Partner • 768049');
-                      }}
-                      className="w-full py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-zinc-200 font-semibold text-xs cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-[#00F5A0]" />
-                      <span>Simulate Instant QR Scan</span>
-                    </button>
-                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowQrPinPopover(false);
+                      setShowCameraModal(true);
+                      audio.play('tap');
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-semibold text-xs cursor-pointer flex items-center justify-center gap-2 transition-colors"
+                  >
+                    <Camera className="w-4 h-4 text-[#00F5A0]" />
+                    <span>Scan Friend's QR with Camera</span>
+                  </button>
                 </div>
               )}
 
@@ -3293,9 +3801,8 @@ export const App: React.FC = () => {
               <Lock className="w-6 h-6" />
             </div>
             <h3 className="text-base font-bold text-white">BlinkMsg Vault Locked</h3>
-            <p className="text-xs text-zinc-400 mt-1 text-center">
-              Real PIN: <span className="font-mono text-[#00F5A0] font-bold">{recoveryPin}</span> • Decoy Safe PIN:{' '}
-              <span className="font-mono text-amber-300 font-bold">0000</span>
+            <p className="text-xs text-zinc-400 mt-1 text-center font-mono">
+              Enter 4-Digit Security PIN
             </p>
 
             <div className="flex gap-3.5 my-6">
@@ -3323,18 +3830,9 @@ export const App: React.FC = () => {
                   {d}
                 </button>
               ))}
-              <button
-                onClick={() => {
-                  audio.play('receive');
-                  setIsLocked(false);
-                  setLockInput('');
-                  localStorage.removeItem('blink_app_lock_active');
-                }}
-                className="h-14 rounded-full bg-[#00F5A0]/15 text-[#00F5A0] flex items-center justify-center cursor-pointer"
-                title="Biometric Unlock"
-              >
-                <Fingerprint className="w-5 h-5" />
-              </button>
+              <div className="h-14 rounded-full flex items-center justify-center text-zinc-600">
+                <Shield className="w-5 h-5" />
+              </div>
               <button
                 onClick={() => handleKeyPress('0')}
                 className="h-14 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-white/5 text-lg font-semibold text-white cursor-pointer"
@@ -3343,9 +3841,104 @@ export const App: React.FC = () => {
               </button>
               <button
                 onClick={() => setLockInput((p) => p.slice(0, -1))}
-                className="h-14 rounded-full text-xs font-semibold text-zinc-400 hover:text-white cursor-pointer"
+                className="h-14 rounded-full bg-zinc-900/60 hover:bg-zinc-800 border border-white/5 text-zinc-400 hover:text-white flex items-center justify-center cursor-pointer active:scale-95"
+                title="Backspace"
               >
-                DEL
+                <CornerUpLeft className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Contact Management Action Sheet (Delete / Clear / Block) */}
+        {actionContact && (
+          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center p-3 animate-in fade-in">
+            <div className="w-full max-w-sm bg-[#12131A] border border-white/10 rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <img
+                    src={actionContact.avatar}
+                    alt={actionContact.name}
+                    className="w-10 h-10 rounded-full object-cover border border-white/10 shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <span className="text-sm font-bold text-white block truncate">
+                      {actionContact.name}
+                    </span>
+                    <span className="text-[11px] text-zinc-400 font-mono block">
+                      {actionContact.handle}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setActionContact(null)}
+                  className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-1.5">
+                {/* 1. Clear Chat History */}
+                <button
+                  onClick={() => {
+                    handleClearChatHistory(actionContact.id);
+                    setActionContact(null);
+                  }}
+                  className="w-full py-3 px-4 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] text-left flex items-center gap-3 text-xs font-semibold text-zinc-200 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4 text-amber-400" />
+                  <div>
+                    <span className="block font-bold text-white">Clear Chat History</span>
+                    <span className="text-[10px] text-zinc-400 font-normal">Wipe messages on this device</span>
+                  </div>
+                </button>
+
+                {/* 2. Block / Unblock User */}
+                <button
+                  onClick={() => {
+                    handleToggleBlock(actionContact.handle);
+                    setActionContact(null);
+                  }}
+                  className="w-full py-3 px-4 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] text-left flex items-center gap-3 text-xs font-semibold text-zinc-200 active:scale-95 transition-all cursor-pointer"
+                >
+                  <Ban className="w-4 h-4 text-rose-400" />
+                  <div>
+                    <span className="block font-bold text-white">
+                      {blockedUsers.includes(actionContact.handle.replace(/^@/, '').toLowerCase())
+                        ? 'Unblock User'
+                        : 'Block User'}
+                    </span>
+                    <span className="text-[10px] text-zinc-400 font-normal">
+                      {blockedUsers.includes(actionContact.handle.replace(/^@/, '').toLowerCase())
+                        ? 'Allow incoming messages from this user'
+                        : 'Prevent this user from messaging you'}
+                    </span>
+                  </div>
+                </button>
+
+                {/* 3. Delete Contact Permanently */}
+                <button
+                  onClick={() => {
+                    handleRemoveContact(actionContact.id);
+                    setActionContact(null);
+                  }}
+                  className="w-full py-3 px-4 rounded-2xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-left flex items-center gap-3 text-xs font-semibold text-rose-300 active:scale-95 transition-all cursor-pointer"
+                >
+                  <UserMinus className="w-4 h-4 text-rose-400" />
+                  <div>
+                    <span className="block font-bold text-rose-200">Remove Contact</span>
+                    <span className="text-[10px] text-rose-300/80 font-normal">Delete contact and all chat data</span>
+                  </div>
+                </button>
+              </div>
+
+              <button
+                onClick={() => setActionContact(null)}
+                className="w-full py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 text-zinc-300 text-xs font-bold cursor-pointer"
+              >
+                Cancel
               </button>
             </div>
           </div>
@@ -3357,215 +3950,9 @@ export const App: React.FC = () => {
           onClose={() => setShowCameraModal(false)}
           onScanSuccess={(decodedText) => {
             setShowCameraModal(false);
-            let code = decodedText.trim();
-            if (code.includes('code=')) {
-              code = code.split('code=')[1].split('&')[0];
-            }
-            connectDirectly(code);
+            connectDirectly(decodedText);
           }}
         />
-
-        {/* =========================================================
-            SETTINGS & IDENTITY MODAL (MANAGE CODE WITHOUT DASH)
-           ========================================================= */}
-        {showSettingsModal && (
-          <div className="absolute inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-            <div className="w-full max-w-[340px] bg-[#141419] border border-white/15 rounded-3xl p-5 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between border-b border-white/10 pb-3">
-                <span className="text-sm font-bold text-white flex items-center gap-2">
-                  <Settings className="w-4 h-4 text-[#00F5A0]" />
-                  Settings & Security
-                </span>
-                <button
-                  onClick={() => setShowSettingsModal(false)}
-                  className="p-1.5 rounded-full bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* 1. 6-Digit Code (No Dash) */}
-              <div className="p-3.5 rounded-2xl bg-black/60 border border-[#00F5A0]/30 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400">
-                    Your 6-Digit Stealth Code
-                  </span>
-                  <span className="text-[9px] text-[#00F5A0] font-mono">Zero Login • No Trace</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl font-mono font-black tracking-widest text-[#00F5A0]">
-                    {myCode.replace(/\D/g, '')}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => {
-                        navigator.clipboard?.writeText(myCode.replace(/\D/g, ''));
-                        setCopied(true);
-                        audio.play('tap');
-                        setTimeout(() => setCopied(false), 1500);
-                      }}
-                      className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      {copied ? <Check className="w-3 h-3 text-[#00F5A0]" /> : <Copy className="w-3 h-3" />}
-                      <span>{copied ? 'Copied' : 'Copy'}</span>
-                    </button>
-                    <button
-                      onClick={() => setShowRegenerateDisclaimer(true)}
-                      className="p-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 cursor-pointer"
-                      title="Regenerate Code"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. Your Handle */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400 block">
-                  Anonymous @Handle
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={myHandle}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setMyHandle(val);
-                      const clean = val.replace(/^@/, '').trim();
-                      if (clean) {
-                        const pin = handleToPin(clean).slice(0, 6);
-                        setMyCode(pin);
-                      }
-                    }}
-                    className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-[#00F5A0]/40"
-                  />
-                  <button
-                    onClick={() => {
-                      audio.play('receive');
-                      const clean = myHandle.replace(/^@/, '').trim();
-                      StorageService.saveProfile({
-                        id: 'usr_' + clean,
-                        handle: clean,
-                        displayName: clean,
-                        avatarId: 1,
-                        vibe: '',
-                        isAvailable: true,
-                        country: 'India',
-                        state: 'Delhi',
-                        city: 'New Delhi',
-                        lastActive: Date.now(),
-                        pin: recoveryPin,
-                      });
-                      alert('Handle & Code saved successfully!');
-                    }}
-                    className="px-3 py-2 rounded-xl bg-[#00F5A0] text-black font-bold text-xs cursor-pointer shadow-md"
-                  >
-                    Save
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. 4-Digit Security PIN */}
-              <div className="space-y-1.5">
-                <label className="text-[10px] uppercase tracking-wider font-semibold text-zinc-400 block">
-                  4-Digit App Lock & Recovery PIN
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="password"
-                    maxLength={4}
-                    value={recoveryPin}
-                    onChange={(e) => setRecoveryPin(e.target.value.replace(/\D/g, ''))}
-                    className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-center font-mono text-sm tracking-[0.5em] text-[#00F5A0] focus:outline-none"
-                  />
-                  <button
-                    onClick={() => {
-                      localStorage.setItem('blink_recovery_pin', recoveryPin);
-                      audio.play('receive');
-                      alert('Recovery PIN updated to ' + recoveryPin);
-                    }}
-                    className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs cursor-pointer"
-                  >
-                    Update
-                  </button>
-                </div>
-                <p className="text-[9px] text-zinc-500">
-                  Decoy PIN: <span className="text-amber-400 font-mono">0000</span> (opens safe decoy chats).
-                </p>
-              </div>
-
-              {/* 4. Privacy & Toggles */}
-              <div className="space-y-2 pt-1 border-t border-white/10">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-300 flex items-center gap-1.5">
-                    <Ghost className="w-3.5 h-3.5 text-violet-400" />
-                    Ghost Mode (Appear Offline)
-                  </span>
-                  <button
-                    onClick={() => setGhostMode(!ghostMode)}
-                    className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                      ghostMode ? 'bg-violet-600' : 'bg-zinc-800'
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-white transition-transform ${
-                        ghostMode ? 'translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-300 flex items-center gap-1.5">
-                    <Volume2 className="w-3.5 h-3.5 text-[#00F5A0]" />
-                    Tactile Audio Sound FX
-                  </span>
-                  <button
-                    onClick={() => setMuted(!muted)}
-                    className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                      !muted ? 'bg-[#00F5A0]' : 'bg-zinc-800'
-                    }`}
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-full bg-black transition-transform ${
-                        !muted ? 'translate-x-4' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {/* 5. Danger Zone */}
-              <div className="pt-2 border-t border-white/10 space-y-2">
-                <button
-                  onClick={() => {
-                    setIsLocked(true);
-                    setShowSettingsModal(false);
-                  }}
-                  className="w-full py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-white/10 text-xs font-semibold text-zinc-200 flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Lock className="w-3.5 h-3.5 text-[#00F5A0]" />
-                  <span>Lock Vault Now</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    if (window.confirm('Wipe all secret chats and restore fresh state?')) {
-                      StorageService.clearAll();
-                      localStorage.clear();
-                      window.location.reload();
-                    }
-                  }}
-                  className="w-full py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-xs font-semibold text-rose-300 flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                  <span>Emergency Wipe All Data</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

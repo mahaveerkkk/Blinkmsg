@@ -187,3 +187,29 @@ body {
 .animate-fingerprint {
   animation: fingerprintPulse 1.8s ease-in-out infinite;
 }
+
+/* Html5Qrcode Camera Scanner Responsive Viewport */
+#blinkmsg-qr-reader {
+  width: 100% !important;
+  height: 100% !important;
+  border: none !important;
+}
+
+#blinkmsg-qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 28px !important;
+}
+
+#blinkmsg-qr-reader__scan_region {
+  width: 100% !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+#blinkmsg-qr-reader__scan_region img {
+  display: none !important;
+}

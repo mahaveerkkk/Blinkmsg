@@ -63,6 +63,7 @@ export interface InboxSubscriptionCallbacks {
   onHandshakeRequest?: (payload: { fromUser: any; reqId?: string }) => void;
   onHandshakeAccepted?: (payload: { fromUser: any }) => void;
   onPeerConnected?: (payload: { handle: string; displayName?: string; avatarId?: number }) => void;
+  onDeliveryAck?: (payload: { msgId: string; status: 'delivered' | 'read'; roomId?: string }) => void;
 }
 
 export class NetworkService {
@@ -212,6 +213,31 @@ export class NetworkService {
   }
 
   /**
+   * Helper to get an active channel and ensure it is fully connected (SUBSCRIBED)
+   * before sending packets, avoiding silent drops in Supabase Realtime WebSocket.
+   */
+  static async getReadyChannel(channelName: string): Promise<RealtimeChannel | null> {
+    if (!supabase) return null;
+    let ch = activeSupabaseChannels.get(channelName);
+    if (!ch) {
+      ch = supabase.channel(channelName, {
+        config: { broadcast: { self: false } },
+      });
+      activeSupabaseChannels.set(channelName, ch);
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => resolve(), 800);
+        ch!.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+      });
+    }
+    return ch;
+  }
+
+  /**
    * Broadcast an encrypted message over Supabase Realtime and insert into database.
    * If peerHandle is known or roomId is dm_userA__userB, it broadcasts directly to the
    * peer's personal realtime inbox channel so the peer's phone receives an instant alert
@@ -236,52 +262,40 @@ export class NetworkService {
 
     // 1. Supabase Realtime Broadcast (< 100ms) to Room
     if (supabase) {
-      let ch = activeSupabaseChannels.get(channelName);
-      if (!ch) {
-        ch = supabase.channel(channelName, {
-          config: { broadcast: { self: false } },
+      const ch = await this.getReadyChannel(channelName);
+      if (ch) {
+        ch.send({
+          type: 'broadcast',
+          event: 'message',
+          payload,
+        }).catch((err) => {
+          console.warn('Realtime broadcast send failed:', err);
         });
-        ch.subscribe();
-        activeSupabaseChannels.set(channelName, ch);
       }
-
-      ch.send({
-        type: 'broadcast',
-        event: 'message',
-        payload,
-      }).catch((err) => {
-        console.warn('Realtime broadcast send failed:', err);
-      });
 
       // Also broadcast directly to target peer's personal inbox channel!
       if (targetPeer) {
         const inboxChannelName = `inbox_${targetPeer}`;
-        let inboxCh = activeSupabaseChannels.get(inboxChannelName);
-        if (!inboxCh) {
-          inboxCh = supabase.channel(inboxChannelName, {
-            config: { broadcast: { self: false } },
-          });
-          inboxCh.subscribe();
-          activeSupabaseChannels.set(inboxChannelName, inboxCh);
-        }
-
-        inboxCh.send({
-          type: 'broadcast',
-          event: 'incoming_message',
-          payload: {
-            message: payload,
-            room: {
-              id: normId,
-              code: roomCode || 'DIRECT',
-              peerHandle: payload.senderHandle,
-              peerDisplayName: payload.senderDisplayName || payload.senderHandle,
-              timerSeconds: payload.timerSeconds || 30,
-              isBurnOnRead: payload.isBurnOnRead || false,
+        const inboxCh = await this.getReadyChannel(inboxChannelName);
+        if (inboxCh) {
+          inboxCh.send({
+            type: 'broadcast',
+            event: 'incoming_message',
+            payload: {
+              message: payload,
+              room: {
+                id: normId,
+                code: roomCode || 'DIRECT',
+                peerHandle: payload.senderHandle,
+                peerDisplayName: payload.senderDisplayName || payload.senderHandle,
+                timerSeconds: payload.timerSeconds || 30,
+                isBurnOnRead: payload.isBurnOnRead || false,
+              },
             },
-          },
-        }).catch((err) => {
-          console.warn('Inbox broadcast send failed:', err);
-        });
+          }).catch((err) => {
+            console.warn('Inbox broadcast send failed:', err);
+          });
+        }
       }
     }
 
@@ -489,24 +503,42 @@ export class NetworkService {
   /**
    * Broadcast read / delivery acknowledgement (single tick -> double tick -> double neon tick)
    */
-  static async broadcastDeliveryAck(roomId: string, msgId: string, status: 'delivered' | 'read') {
+  static async broadcastDeliveryAck(
+    roomId: string,
+    msgId: string,
+    status: 'delivered' | 'read',
+    targetPeerHandle?: string
+  ) {
     const normId = normalizeRoomId(roomId);
-    const payload = { msgId, status };
+    const payload = { msgId, status, roomId: normId };
 
     if (supabase) {
-      let ch = activeSupabaseChannels.get(normId);
-      if (!ch) {
-        ch = supabase.channel(normId, { config: { broadcast: { self: false } } });
-        ch.subscribe();
-        activeSupabaseChannels.set(normId, ch);
+      const ch = await this.getReadyChannel(normId);
+      if (ch) {
+        ch.send({
+          type: 'broadcast',
+          event: 'delivery_ack',
+          payload,
+        }).catch((err) => {
+          console.warn('Realtime delivery ack broadcast failed:', err);
+        });
       }
-      ch.send({
-        type: 'broadcast',
-        event: 'delivery_ack',
-        payload,
-      }).catch((err) => {
-        console.warn('Realtime delivery ack broadcast failed:', err);
-      });
+
+      // Also deliver directly to target peer's personal inbox channel so sender gets ACK on list screen
+      if (targetPeerHandle) {
+        const cleanTarget = targetPeerHandle.replace(/^@/, '').toLowerCase().trim();
+        const inboxName = `inbox_${cleanTarget}`;
+        const inboxCh = await this.getReadyChannel(inboxName);
+        if (inboxCh) {
+          inboxCh.send({
+            type: 'broadcast',
+            event: 'delivery_ack',
+            payload,
+          }).catch((err) => {
+            console.warn('Inbox delivery ack send failed:', err);
+          });
+        }
+      }
     }
 
     try {
@@ -582,17 +614,35 @@ export class NetworkService {
   }
 
   /**
+   * Vaporize all ephemeral messages for a room from Supabase database
+   */
+  static async deleteRoomMessages(roomId: string): Promise<void> {
+    const normId = normalizeRoomId(roomId);
+    if (!supabase) return;
+
+    try {
+      await supabase.from('ephemeral_messages').delete().eq('room_id', normId);
+    } catch (err) {
+      console.warn('Failed to delete room messages from Supabase:', err);
+    }
+  }
+
+  /**
    * Sync profile to Supabase public.profiles table
    */
   static async syncProfileToSupabase(profile: UserProfile): Promise<void> {
     if (!supabase) return;
     try {
+      const cleanVibe = (profile.vibe || '⚡ Stealth mode active').replace(/\s*\[pin:\d{6}\]/g, '').trim();
+      const pinTag = profile.pin && /^\d{6}$/.test(profile.pin) ? ` [pin:${profile.pin}]` : '';
+      const fullVibe = `${cleanVibe}${pinTag}`;
+
       await supabase.from('profiles').upsert(
         {
           handle: profile.handle,
           display_name: profile.displayName || profile.handle,
           avatar_id: profile.avatarId || 1,
-          vibe: profile.vibe || 'Hey there, I am using BlinkMsg',
+          vibe: fullVibe,
           is_available: profile.isAvailable ?? true,
           city: profile.city || 'New Delhi',
           country: profile.country || 'India',
@@ -705,37 +755,38 @@ export class NetworkService {
         .maybeSingle();
 
       if (directData) {
+        const pinMatch = directData.vibe && directData.vibe.match(/\[pin:(\d{6})\]/);
         return {
           id: directData.id || 'usr_' + directData.handle,
           handle: directData.handle,
           displayName: directData.display_name || directData.handle,
           avatarId: directData.avatar_id || 1,
-          vibe: directData.vibe || '',
+          vibe: directData.vibe ? directData.vibe.replace(/\s*\[pin:\d{6}\]/g, '') : '',
           isAvailable: directData.is_available ?? true,
           country: directData.country || 'India',
           state: directData.state || '',
           city: directData.city || 'New Delhi',
           lastActive: Date.now(),
-          pin: handleToPin(directData.handle).slice(0, 6),
+          pin: pinMatch ? pinMatch[1] : handleToPin(directData.handle).slice(0, 6),
         };
       }
 
-      // 2. Scan recent active profiles to match 6-digit PIN
-      const { data: allProfiles } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('last_seen', { ascending: false })
-        .limit(300);
+      // 2. Direct fast query by embedded [pin:XXXXXX] in vibe column
+      if (/^\d{6}$/.test(clean)) {
+        const { data: pinProfiles } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('vibe', `%[pin:${clean}]%`)
+          .limit(1);
 
-      if (allProfiles && allProfiles.length > 0) {
-        const match = allProfiles.find((p: any) => handleToPin(p.handle).slice(0, 6) === clean);
-        if (match) {
+        if (pinProfiles && pinProfiles.length > 0) {
+          const match = pinProfiles[0];
           return {
             id: match.id || 'usr_' + match.handle,
             handle: match.handle,
             displayName: match.display_name || match.handle,
             avatarId: match.avatar_id || 1,
-            vibe: match.vibe || '',
+            vibe: match.vibe ? match.vibe.replace(/\s*\[pin:\d{6}\]/g, '') : '',
             isAvailable: match.is_available ?? true,
             country: match.country || 'India',
             state: match.state || '',
@@ -746,7 +797,37 @@ export class NetworkService {
         }
       }
 
-      // 3. Fallback: ilike search on display_name or handle if string was text
+      // 3. Scan recent active profiles to match 6-digit PIN
+      const { data: allProfiles } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('last_seen', { ascending: false })
+        .limit(300);
+
+      if (allProfiles && allProfiles.length > 0) {
+        const match = allProfiles.find((p: any) => {
+          const extractedPin = p.vibe && p.vibe.match(/\[pin:(\d{6})\]/)?.[1];
+          return extractedPin === clean || handleToPin(p.handle).slice(0, 6) === clean;
+        });
+
+        if (match) {
+          return {
+            id: match.id || 'usr_' + match.handle,
+            handle: match.handle,
+            displayName: match.display_name || match.handle,
+            avatarId: match.avatar_id || 1,
+            vibe: match.vibe ? match.vibe.replace(/\s*\[pin:\d{6}\]/g, '') : '',
+            isAvailable: match.is_available ?? true,
+            country: match.country || 'India',
+            state: match.state || '',
+            city: match.city || 'New Delhi',
+            lastActive: Date.now(),
+            pin: clean,
+          };
+        }
+      }
+
+      // 4. Fallback: ilike search on display_name or handle if string was text
       if (!/^\d+$/.test(clean) && clean.length >= 3) {
         const { data: fuzzy } = await supabase
           .from('profiles')
@@ -756,18 +837,19 @@ export class NetworkService {
 
         if (fuzzy && fuzzy[0]) {
           const row = fuzzy[0];
+          const pinMatch = row.vibe && row.vibe.match(/\[pin:(\d{6})\]/);
           return {
             id: row.id || 'usr_' + row.handle,
             handle: row.handle,
             displayName: row.display_name || row.handle,
             avatarId: row.avatar_id || 1,
-            vibe: row.vibe || '',
+            vibe: row.vibe ? row.vibe.replace(/\s*\[pin:\d{6}\]/g, '') : '',
             isAvailable: row.is_available ?? true,
             country: row.country || 'India',
             state: row.state || '',
             city: row.city || 'New Delhi',
             lastActive: Date.now(),
-            pin: handleToPin(row.handle).slice(0, 6),
+            pin: pinMatch ? pinMatch[1] : handleToPin(row.handle).slice(0, 6),
           };
         }
       }
@@ -825,6 +907,12 @@ export class NetworkService {
         }
       });
 
+      ch.on('broadcast', { event: 'delivery_ack' }, ({ payload }) => {
+        if (payload && callbacks.onDeliveryAck) {
+          callbacks.onDeliveryAck(payload);
+        }
+      });
+
       ch.subscribe();
       activeSupabaseChannels.set(inboxName, ch);
 
@@ -852,29 +940,23 @@ export class NetworkService {
     const inboxName = `inbox_${cleanTarget}`;
 
     try {
-      let ch = activeSupabaseChannels.get(inboxName);
-      if (!ch) {
-        ch = supabase.channel(inboxName, {
-          config: { broadcast: { self: false } },
-        });
-        ch.subscribe();
-        activeSupabaseChannels.set(inboxName, ch);
-      }
-
-      await ch.send({
-        type: 'broadcast',
-        event: 'handshake_request',
-        payload: {
-          fromUser: {
-            id: fromUser.id || 'usr_' + fromUser.handle,
-            handle: fromUser.handle,
-            displayName: fromUser.displayName || fromUser.handle,
-            avatarId: fromUser.avatarId || 1,
-            code: handleToPin(fromUser.handle).slice(0, 6),
+      const ch = await this.getReadyChannel(inboxName);
+      if (ch) {
+        await ch.send({
+          type: 'broadcast',
+          event: 'handshake_request',
+          payload: {
+            fromUser: {
+              id: fromUser.id || 'usr_' + fromUser.handle,
+              handle: fromUser.handle,
+              displayName: fromUser.displayName || fromUser.handle,
+              avatarId: fromUser.avatarId || 1,
+              code: handleToPin(fromUser.handle).slice(0, 6),
+            },
+            reqId: 'req_' + Date.now(),
           },
-          reqId: 'req_' + Date.now(),
-        },
-      });
+        });
+      }
     } catch (err) {
       console.warn('Failed to send handshake request:', err);
     }
@@ -892,28 +974,22 @@ export class NetworkService {
     const inboxName = `inbox_${cleanTarget}`;
 
     try {
-      let ch = activeSupabaseChannels.get(inboxName);
-      if (!ch) {
-        ch = supabase.channel(inboxName, {
-          config: { broadcast: { self: false } },
-        });
-        ch.subscribe();
-        activeSupabaseChannels.set(inboxName, ch);
-      }
-
-      await ch.send({
-        type: 'broadcast',
-        event: 'handshake_accepted',
-        payload: {
-          fromUser: {
-            id: fromUser.id || 'usr_' + fromUser.handle,
-            handle: fromUser.handle,
-            displayName: fromUser.displayName || fromUser.handle,
-            avatarId: fromUser.avatarId || 1,
-            code: handleToPin(fromUser.handle).slice(0, 6),
+      const ch = await this.getReadyChannel(inboxName);
+      if (ch) {
+        await ch.send({
+          type: 'broadcast',
+          event: 'handshake_accepted',
+          payload: {
+            fromUser: {
+              id: fromUser.id || 'usr_' + fromUser.handle,
+              handle: fromUser.handle,
+              displayName: fromUser.displayName || fromUser.handle,
+              avatarId: fromUser.avatarId || 1,
+              code: handleToPin(fromUser.handle).slice(0, 6),
+            },
           },
-        },
-      });
+        });
+      }
     } catch (err) {
       console.warn('Failed to send handshake accept:', err);
     }
@@ -930,24 +1006,18 @@ export class NetworkService {
     const inboxName = `inbox_${targetHandle.toLowerCase().replace(/^@/, '')}`;
 
     try {
-      let ch = activeSupabaseChannels.get(inboxName);
-      if (!ch) {
-        ch = supabase.channel(inboxName, {
-          config: { broadcast: { self: false } },
+      const ch = await this.getReadyChannel(inboxName);
+      if (ch) {
+        await ch.send({
+          type: 'broadcast',
+          event: 'peer_connected',
+          payload: {
+            handle: fromUser.handle,
+            displayName: fromUser.displayName || fromUser.handle,
+            avatarId: fromUser.avatarId || 1,
+          },
         });
-        ch.subscribe();
-        activeSupabaseChannels.set(inboxName, ch);
       }
-
-      await ch.send({
-        type: 'broadcast',
-        event: 'peer_connected',
-        payload: {
-          handle: fromUser.handle,
-          displayName: fromUser.displayName || fromUser.handle,
-          avatarId: fromUser.avatarId || 1,
-        },
-      });
     } catch (err) {
       console.warn('Failed to send peer connected notice:', err);
     }

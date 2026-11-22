@@ -2,73 +2,82 @@ import React, { useState } from 'react';
 import {
   Check,
   Copy,
-  QrCode,
-  KeyRound,
   Shield,
   Eye,
   EyeOff,
-  LogOut,
-  X,
-  Edit2,
-  ChevronRight,
   Camera,
-  Timer,
   Volume2,
   VolumeX,
   Ghost,
   Sparkles,
   Lock,
+  RefreshCw,
+  Trash2,
+  KeyRound,
+  User,
+  AtSign,
+  X,
 } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
 import { UserProfile } from '../types';
 import { Avatar } from './Avatar';
 import { sound } from '../services/sound';
 import { StorageService } from '../services/storage';
-import { handleToPin } from '../services/network';
 
 interface ProfileViewProps {
   currentUser: UserProfile;
+  recoveryPin: string;
+  onUpdateRecoveryPin: (pin: string) => void;
   onSave: (updated: Partial<UserProfile>) => void;
+  onRegenerateCode: () => void;
   onResetAccount: () => void;
+  ghostMode: boolean;
+  onToggleGhost: () => void;
+  soundMuted: boolean;
+  onToggleSound: () => void;
+  blockedUsers?: string[];
+  onUnblockUser?: (handle: string) => void;
+  onLockApp?: () => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
   currentUser,
+  recoveryPin,
+  onUpdateRecoveryPin,
   onSave,
+  onRegenerateCode,
   onResetAccount,
+  ghostMode,
+  onToggleGhost,
+  soundMuted,
+  onToggleSound,
+  blockedUsers = [],
+  onUnblockUser,
+  onLockApp,
 }) => {
-  const [displayName, setDisplayName] = useState(currentUser.displayName);
+  const [displayName, setDisplayName] = useState(currentUser.displayName || currentUser.handle);
+  const [handle, setHandle] = useState(currentUser.handle);
   const [avatarId, setAvatarId] = useState(currentUser.avatarId || 1);
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [showQRModal, setShowQRModal] = useState(false);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
-  const [showTimerModal, setShowTimerModal] = useState(false);
-  const [showRecoveryPin, setShowRecoveryPin] = useState(false);
-  const [copiedHandle, setCopiedHandle] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [showPinMasked, setShowPinMasked] = useState(true);
+  const [editingRecoveryPin, setEditingRecoveryPin] = useState(recoveryPin);
   const [copiedPin, setCopiedPin] = useState(false);
-  const [defaultTimer, setDefaultTimer] = useState<number>(30);
-  const [isGhostMode, setIsGhostMode] = useState<boolean>(!currentUser.isAvailable);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [appLockEnabled, setAppLockEnabled] = useState<boolean>(() => {
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [pinUpdateSuccess, setPinUpdateSuccess] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [autoLockEnabled, setAutoLockEnabled] = useState<boolean>(() => {
     return localStorage.getItem('blink_app_lock_enabled') === 'true';
   });
 
-  const handleToggleAppLock = () => {
-    sound.vibrate(10);
-    const next = !appLockEnabled;
-    setAppLockEnabled(next);
-    localStorage.setItem('blink_app_lock_enabled', String(next));
+  const toggleAutoLock = () => {
+    const next = !autoLockEnabled;
+    setAutoLockEnabled(next);
+    localStorage.setItem('blink_app_lock_enabled', next ? 'true' : 'false');
+    sound.vibrate(8);
   };
 
-  const myPin = handleToPin(currentUser.handle);
-  const formattedPin = myPin.length === 6 ? `${myPin.slice(0, 3)} - ${myPin.slice(3)}` : myPin;
-
-  const handleCopyHandle = () => {
-    navigator.clipboard?.writeText('@' + currentUser.handle);
-    sound.vibrate(10);
-    setCopiedHandle(true);
-    setTimeout(() => setCopiedHandle(false), 2000);
-  };
+  const myPin = currentUser.pin || localStorage.getItem('blink_user_code') || '768049';
+  const formattedPin = myPin.length === 6 ? `${myPin.slice(0, 3)} ${myPin.slice(3)}` : myPin;
 
   const handleCopyPin = () => {
     navigator.clipboard?.writeText(myPin);
@@ -77,341 +86,379 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setTimeout(() => setCopiedPin(false), 2000);
   };
 
-  const handleSaveName = () => {
-    sound.vibrate(10);
-    setIsEditingName(false);
-    onSave({ displayName: displayName.trim() || currentUser.displayName });
+  const handleSaveProfile = () => {
+    sound.vibrate(12);
+    sound.playReceive();
+    const cleanHandle = handle.trim().replace(/^@/, '').toLowerCase();
+    const cleanName = displayName.trim() || cleanHandle;
+
+    onSave({
+      displayName: cleanName,
+      handle: cleanHandle,
+      avatarId,
+    });
+
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
   };
 
-  const handleSelectAvatar = (id: number) => {
-    sound.vibrate(8);
-    setAvatarId(id);
-    onSave({ avatarId: id });
-    setShowAvatarModal(false);
-  };
-
-  const handleToggleGhost = () => {
-    sound.vibrate(10);
-    const next = !isGhostMode;
-    setIsGhostMode(next);
-    onSave({ isAvailable: !next });
-  };
-
-  const getTimerLabel = (val: number) => {
-    if (val === 0) return '🔥 Burn on Read';
-    if (val === 10) return '10 seconds';
-    if (val === 30) return '30 seconds';
-    if (val === 60) return '1 minute';
-    return `${val}s`;
+  const handleSaveRecoveryPin = () => {
+    const clean = editingRecoveryPin.replace(/\D/g, '').slice(0, 4);
+    if (clean.length === 4) {
+      sound.vibrate(10);
+      onUpdateRecoveryPin(clean);
+      setPinUpdateSuccess(true);
+      setTimeout(() => setPinUpdateSuccess(false), 2000);
+    }
   };
 
   return (
-    <div className="pb-32 pt-2 px-4 max-w-md mx-auto select-none font-sans min-h-screen bg-[#07080B] text-white">
-      {/* 1. Sleek Profile Header (Telegram / iOS Native Style) */}
-      <div className="flex flex-col items-center text-center pt-4 pb-6">
-        {/* Avatar with Camera badge */}
-        <div className="relative mb-3 group cursor-pointer" onClick={() => setShowAvatarModal(true)}>
-          <div className="ring-2 ring-white/[0.1] hover:ring-[#D4FF00]/50 rounded-full p-1 transition-all">
+    <div className="pb-36 pt-4 px-4 max-w-md mx-auto select-none font-sans min-h-screen bg-[#07080B] text-white">
+      {/* Top Header */}
+      <div className="mb-5 flex items-center justify-between">
+        <div>
+          <h1 className="font-extrabold text-2xl tracking-tight text-white flex items-center gap-2">
+            <span>Settings</span>
+            <span className="w-2 h-2 rounded-full bg-[#00F5A0] shadow-[0_0_8px_#00F5A0]" />
+          </h1>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Identity, Stealth & Security Controls
+          </p>
+        </div>
+      </div>
+
+      {/* 1. Profile Avatar & Name Card */}
+      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 text-center relative">
+        <div
+          className="relative inline-block mx-auto mb-3 cursor-pointer group"
+          onClick={() => setShowAvatarModal(true)}
+        >
+          <div className="ring-2 ring-white/10 group-hover:ring-[#00F5A0]/50 rounded-full p-1 transition-all">
             <Avatar avatarId={avatarId} size="xl" name={currentUser.handle} />
           </div>
           <button
-            className="absolute bottom-1 right-1 w-7 h-7 rounded-full bg-[#181C26] border border-white/[0.15] text-[#D4FF00] flex items-center justify-center shadow-lg active:scale-90 transition-transform"
+            type="button"
+            className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#00F5A0] text-zinc-950 flex items-center justify-center shadow-lg active:scale-90 transition-transform cursor-pointer"
             title="Change Avatar"
           >
-            <Camera className="w-3.5 h-3.5" />
+            <Camera className="w-4 h-4 stroke-[2.5]" />
           </button>
         </div>
 
-        {/* Display Name with inline edit */}
-        {isEditingName ? (
-          <div className="flex items-center justify-center space-x-2 mb-1 max-w-xs w-full">
-            <input
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              autoFocus
-              className="bg-[#141722] border border-[#D4FF00]/50 rounded-xl px-3 py-1.5 text-base text-center text-white outline-none font-bold w-48"
-            />
-            <button
-              onClick={handleSaveName}
-              className="p-2 rounded-xl bg-[#D4FF00] text-black font-black active:scale-95 text-xs shadow-md"
-            >
-              <Check className="w-4 h-4 stroke-[3]" />
-            </button>
+        <div className="space-y-3 max-w-xs mx-auto text-left">
+          {/* Display Name Input */}
+          <div>
+            <label className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block mb-1">
+              Display Name
+            </label>
+            <div className="relative">
+              <User className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                placeholder="Your Display Name"
+                className="w-full bg-black/60 border border-white/10 rounded-2xl pl-9 pr-3 py-2.5 text-xs text-white font-bold placeholder-zinc-500 focus:outline-none focus:border-[#00F5A0]/50 transition-colors shadow-inner"
+              />
+            </div>
           </div>
-        ) : (
-          <div className="flex items-center justify-center space-x-1.5 mb-1 group cursor-pointer" onClick={() => setIsEditingName(true)}>
-            <h2 className="font-extrabold text-xl text-white tracking-tight">
-              {displayName || currentUser.displayName}
-            </h2>
-            <Edit2 className="w-3.5 h-3.5 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+
+          {/* Anonymous @Handle Input */}
+          <div>
+            <label className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block mb-1">
+              Anonymous @Handle
+            </label>
+            <div className="relative">
+              <AtSign className="w-4 h-4 text-[#00F5A0] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={handle}
+                onChange={(e) => setHandle(e.target.value.replace(/^@/, ''))}
+                placeholder="handle_name"
+                className="w-full bg-black/60 border border-white/10 rounded-2xl pl-9 pr-3 py-2.5 text-xs text-white font-mono font-bold placeholder-zinc-500 focus:outline-none focus:border-[#00F5A0]/50 transition-colors shadow-inner"
+              />
+            </div>
           </div>
-        )}
 
-        {/* Copyable @handle pill */}
-        <button
-          onClick={handleCopyHandle}
-          className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-white/[0.04] hover:bg-white/[0.08] text-xs font-mono active:scale-95 transition-all border border-white/[0.06] mt-0.5"
-        >
-          <span className="text-[#D4FF00] font-bold">@{currentUser.handle}</span>
-          {copiedHandle ? (
-            <Check className="w-3.5 h-3.5 text-[#00F5A0]" />
-          ) : (
-            <Copy className="w-3 h-3 text-zinc-400" />
-          )}
-        </button>
-      </div>
-
-      {/* 2. Grouped Section: My Connection & Identity (iOS Inset Group Style) */}
-      <div className="mb-4">
-        <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider px-3 mb-1.5 block font-bold">
-          Connection & Identity
-        </span>
-        <div className="bg-[#0F121C] border border-white/[0.08] rounded-2xl overflow-hidden shadow-sm divide-y divide-white/[0.05]">
-          {/* Row 1: Personal Code */}
-          <div
-            onClick={handleCopyPin}
-            className="px-4 py-3.5 flex items-center justify-between hover:bg-white/[0.02] active:bg-white/[0.05] transition-colors cursor-pointer"
+          <button
+            onClick={handleSaveProfile}
+            className="w-full py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-md shadow-[#00F5A0]/20 cursor-pointer"
           >
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-[#D4FF00]/10 border border-[#D4FF00]/20 flex items-center justify-center text-[#D4FF00]">
-                <KeyRound className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-sm font-semibold text-white block">My Connection Code</span>
-                <span className="text-[11px] text-zinc-400 font-mono block">Share with friends to chat</span>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <span className="font-mono text-sm font-bold text-[#D4FF00] tracking-wider bg-black/40 px-2 py-0.5 rounded-lg border border-white/[0.06]">
-                {formattedPin}
-              </span>
-              <button
-                className="p-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-zinc-300"
-                title="Copy Code"
-              >
-                {copiedPin ? <Check className="w-3.5 h-3.5 text-[#00F5A0]" /> : <Copy className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Row 2: QR Code */}
-          <div
-            onClick={() => {
-              sound.vibrate(8);
-              setShowQRModal(true);
-            }}
-            className="px-4 py-3.5 flex items-center justify-between hover:bg-white/[0.02] active:bg-white/[0.05] transition-colors cursor-pointer"
-          >
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-[#00F5A0]/10 border border-[#00F5A0]/20 flex items-center justify-center text-[#00F5A0]">
-                <QrCode className="w-4 h-4" />
-              </div>
-              <span className="text-sm font-semibold text-white">My QR Code</span>
-            </div>
-
-            <ChevronRight className="w-4 h-4 text-zinc-500" />
-          </div>
+            {saveSuccess ? <Check className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+            <span>{saveSuccess ? 'Profile Saved Successfully!' : 'Save Profile Changes'}</span>
+          </button>
         </div>
       </div>
 
-      {/* 3. Grouped Section: Privacy & Chat Security */}
-      <div className="mb-4">
-        <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider px-3 mb-1.5 block font-bold">
-          Privacy & Security
-        </span>
-        <div className="bg-[#0F121C] border border-white/[0.08] rounded-2xl overflow-hidden shadow-sm divide-y divide-white/[0.05]">
-          {/* Row 1: Disappearing Timer */}
-          <div
-            onClick={() => {
-              sound.vibrate(6);
-              setShowTimerModal(true);
-            }}
-            className="px-4 py-3.5 flex items-center justify-between hover:bg-white/[0.02] active:bg-white/[0.05] transition-colors cursor-pointer"
-          >
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                <Timer className="w-4 h-4" />
-              </div>
-              <span className="text-sm font-semibold text-white">Disappearing Messages</span>
-            </div>
+      {/* 2. Permanent 6-Digit Stealth PIN Card */}
+      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">
+            Permanent 6-Digit Connection PIN
+          </span>
+          <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/10 border border-[#00F5A0]/25 px-2 py-0.5 rounded-full font-bold">
+            Zero-Login
+          </span>
+        </div>
 
-            <div className="flex items-center space-x-1.5 text-zinc-400">
-              <span className="text-xs font-mono font-medium text-[#D4FF00]">
-                {getTimerLabel(defaultTimer)}
-              </span>
-              <ChevronRight className="w-4 h-4 text-zinc-500" />
-            </div>
+        <div className="p-3.5 rounded-2xl bg-black/60 border border-white/10 flex items-center justify-between shadow-inner">
+          <div>
+            <span className="font-mono text-2xl font-black text-[#00F5A0] tracking-widest">
+              {formattedPin}
+            </span>
+            <span className="text-[11px] text-zinc-400 block mt-0.5">
+              Friends can use this code to connect & chat
+            </span>
           </div>
 
-          {/* Row 2: Account Recovery PIN */}
-          <div className="px-4 py-3.5 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                <Shield className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-sm font-semibold text-white block">Recovery Login PIN</span>
-                <span className="text-[11px] text-zinc-400 font-mono block">Required to restore account</span>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <span className="font-mono text-sm font-bold text-white tracking-widest bg-black/40 px-2 py-0.5 rounded-lg border border-white/[0.06]">
-                {showRecoveryPin ? (currentUser.pin || myPin.slice(0, 4)) : '••••'}
-              </span>
-              <button
-                onClick={() => setShowRecoveryPin(!showRecoveryPin)}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-white"
-              >
-                {showRecoveryPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5 text-[#00F5A0]" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Row 3: Ghost Mode (Incognito) */}
-          <div className="px-4 py-3.5 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
-                <Ghost className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-sm font-semibold text-white block">Ghost Mode</span>
-                <span className="text-[11px] text-zinc-400 font-mono block">Hide online presence</span>
-              </div>
-            </div>
-
+          <div className="flex items-center gap-1.5">
             <button
-              onClick={handleToggleGhost}
-              className={`w-11 h-6 rounded-full transition-colors duration-200 p-0.5 flex items-center shrink-0 cursor-pointer ${
-                isGhostMode ? 'bg-[#00F5A0]' : 'bg-zinc-800'
-              }`}
+              onClick={handleCopyPin}
+              className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
             >
-              <div
-                className={`w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${
-                  isGhostMode ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
+              {copiedPin ? <Check className="w-3.5 h-3.5 text-[#00F5A0]" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedPin ? 'Copied' : 'Copy'}</span>
             </button>
-          </div>
-
-          {/* Row 4: Chat Sounds */}
-          <div className="px-4 py-3.5 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
-                {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-              </div>
-              <span className="text-sm font-semibold text-white">Audio Chimes</span>
-            </div>
 
             <button
               onClick={() => {
-                sound.vibrate(6);
-                setSoundEnabled(!soundEnabled);
+                if (confirm('Regenerate your 6-digit connection PIN? Past invite codes will no longer connect.')) {
+                  onRegenerateCode();
+                }
               }}
-              className={`w-11 h-6 rounded-full transition-colors duration-200 p-0.5 flex items-center shrink-0 cursor-pointer ${
-                soundEnabled ? 'bg-[#D4FF00]' : 'bg-zinc-800'
-              }`}
+              className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/25 active:scale-95 transition-all cursor-pointer"
+              title="Regenerate PIN"
             >
-              <div
-                className={`w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${
-                  soundEnabled ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Row 5: Stealth App Lock */}
-          <div className="px-4 py-3.5 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-[#00F5A0]">
-                <Lock className="w-4 h-4" />
-              </div>
-              <div>
-                <span className="text-sm font-semibold text-white block">Stealth App Lock</span>
-                <span className="text-[11px] text-zinc-400 font-mono block">Lock PIN on minimize / app switch</span>
-              </div>
-            </div>
-
-            <button
-              onClick={handleToggleAppLock}
-              className={`w-11 h-6 rounded-full transition-colors duration-200 p-0.5 flex items-center shrink-0 cursor-pointer ${
-                appLockEnabled ? 'bg-[#00F5A0]' : 'bg-zinc-800'
-              }`}
-            >
-              <div
-                className={`w-5 h-5 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${
-                  appLockEnabled ? 'translate-x-5' : 'translate-x-0'
-                }`}
-              />
+              <RefreshCw className="w-4 h-4" />
             </button>
           </div>
         </div>
       </div>
 
-      {/* 4. Grouped Section: Account Actions */}
-      <div className="mb-6">
-        <div className="bg-[#0F121C] border border-white/[0.08] rounded-2xl overflow-hidden shadow-sm">
-          <button
-            onClick={() => {
-              sound.playPanic();
-              if (confirm('Log out from this device? Make sure you have noted your @handle and recovery PIN.')) {
-                StorageService.clearAll();
-                onResetAccount();
-              }
-            }}
-            className="w-full px-4 py-3.5 flex items-center justify-between text-red-400 hover:bg-red-500/[0.05] active:bg-red-500/[0.1] transition-colors"
-          >
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-red-400">
-                <LogOut className="w-4 h-4" />
-              </div>
-              <span className="text-sm font-semibold">Log Out / Switch Identity</span>
-            </div>
+      {/* 3. 4-Digit Security & App Lock PIN */}
+      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">
+            4-Digit Master Lock & Recovery PIN
+          </span>
+          <span className="text-[10px] font-mono text-zinc-400">Security</span>
+        </div>
 
-            <ChevronRight className="w-4 h-4 text-red-400/50" />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <input
+              type={showPinMasked ? 'password' : 'text'}
+              maxLength={4}
+              value={editingRecoveryPin}
+              onChange={(e) => setEditingRecoveryPin(e.target.value.replace(/\D/g, ''))}
+              placeholder="••••"
+              className="w-full bg-black/60 border border-white/10 rounded-2xl px-4 py-2.5 text-center font-mono text-lg font-bold tracking-[0.5em] text-[#00F5A0] focus:outline-none focus:border-[#00F5A0]/50 transition-colors shadow-inner"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPinMasked(!showPinMasked)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
+            >
+              {showPinMasked ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+            </button>
+          </div>
+
+          <button
+            onClick={handleSaveRecoveryPin}
+            disabled={editingRecoveryPin.length !== 4}
+            className="px-4 py-3 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs disabled:opacity-30 active:scale-95 transition-all cursor-pointer shadow-md"
+          >
+            {pinUpdateSuccess ? 'Updated!' : 'Update'}
+          </button>
+        </div>
+
+        <p className="text-[11px] text-zinc-500 leading-relaxed">
+          Decoy PIN: <span className="text-amber-400 font-mono font-bold">0000</span> (Entering 0000 on lock screen opens safe decoy chats).
+        </p>
+      </div>
+
+      {/* 4. Privacy & Stealth Toggles */}
+      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-4">
+        <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400 block">
+          Stealth & System Preferences
+        </span>
+
+        {/* Ghost Mode Toggle */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-400">
+              <Ghost className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Ghost Cloak Mode</span>
+              <span className="text-[11px] text-zinc-400 block">Hide online status & green dot</span>
+            </div>
+          </div>
+
+          <button
+            onClick={onToggleGhost}
+            className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer ${
+              ghostMode ? 'bg-violet-600' : 'bg-zinc-800'
+            }`}
+          >
+            <div
+              className={`w-5 h-5 rounded-full bg-white transition-transform ${
+                ghostMode ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Tactile Audio Toggle */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-[#00F5A0]/15 border border-[#00F5A0]/30 flex items-center justify-center text-[#00F5A0]">
+              {soundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Tactile Sound FX</span>
+              <span className="text-[11px] text-zinc-400 block">Haptic clicks & burning audio</span>
+            </div>
+          </div>
+
+          <button
+            onClick={onToggleSound}
+            className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer ${
+              !soundMuted ? 'bg-[#00F5A0]' : 'bg-zinc-800'
+            }`}
+          >
+            <div
+              className={`w-5 h-5 rounded-full bg-zinc-950 transition-transform ${
+                !soundMuted ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Auto-Lock when Minimized Toggle */}
+        <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <Lock className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Auto-Lock When Hidden</span>
+              <span className="text-[11px] text-zinc-400 block">Require PIN when app is minimized</span>
+            </div>
+          </div>
+
+          <button
+            onClick={toggleAutoLock}
+            className={`w-11 h-6 rounded-full p-0.5 transition-colors cursor-pointer ${
+              autoLockEnabled ? 'bg-amber-400' : 'bg-zinc-800'
+            }`}
+          >
+            <div
+              className={`w-5 h-5 rounded-full bg-zinc-950 transition-transform ${
+                autoLockEnabled ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Lock Vault Now Button */}
+        {onLockApp && (
+          <div className="pt-2">
+            <button
+              onClick={() => {
+                sound.vibrate(15);
+                onLockApp();
+              }}
+              className="w-full py-2.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/10 text-xs font-bold text-zinc-200 flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+            >
+              <Lock className="w-4 h-4 text-[#00F5A0]" />
+              <span>Lock Vault Now</span>
+            </button>
+          </div>
+        )}
+
+        {/* Blocked Contacts Management */}
+        <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400">
+              <Shield className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white block">Blocked Contacts</span>
+              <span className="text-[11px] text-zinc-400 block">{blockedUsers.length} user{blockedUsers.length === 1 ? '' : 's'} blocked</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setShowBlockedModal(true)}
+            disabled={blockedUsers.length === 0}
+            className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 disabled:opacity-40 text-xs font-semibold text-zinc-200 cursor-pointer active:scale-95 transition-all"
+          >
+            Manage
           </button>
         </div>
       </div>
 
-      {/* 5. Clean App Branding Footer */}
-      <div className="text-center pt-2 pb-6">
-        <div className="flex items-center justify-center space-x-1.5 text-zinc-500 text-xs font-mono">
-          <Sparkles className="w-3 h-3 text-[#D4FF00]" />
-          <span>BlinkMsg v1.2</span>
-          <span>•</span>
-          <span>Zero-Trace Ephemeral Protocol</span>
-        </div>
+      {/* 5. Danger Zone */}
+      <div className="rounded-3xl bg-rose-500/10 border border-rose-500/20 p-5 shadow-2xl space-y-3">
+        <span className="text-[10px] uppercase tracking-wider font-bold text-rose-300 block">
+          Danger Zone
+        </span>
+
+        {showResetConfirm ? (
+          <div className="space-y-2">
+            <p className="text-xs text-rose-200 leading-relaxed font-semibold">
+              Are you sure? This will permanently wipe all local chats, contacts, and encryption keys from this device.
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                onClick={onResetAccount}
+                className="py-2.5 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs active:scale-95 transition-all shadow-md cursor-pointer"
+              >
+                Yes, Wipe Everything
+              </button>
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white font-semibold text-xs active:scale-95 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowResetConfirm(true)}
+            className="w-full py-2.5 rounded-2xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4 text-rose-400" />
+            <span>Wipe All Local Data & Reset Session</span>
+          </button>
+        )}
       </div>
 
-      {/* Modal 1: Avatar Selector Bottom Sheet / Modal */}
+      {/* Avatar Picker Modal */}
       {showAvatarModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-xs bg-[#0F121C] border border-white/[0.1] rounded-3xl p-5 shadow-2xl relative text-center">
-            <button
-              onClick={() => setShowAvatarModal(false)}
-              className="absolute top-4 right-4 p-1 rounded-full bg-white/[0.06] text-zinc-400 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <h3 className="font-extrabold text-base text-white mb-1">
-              Choose Avatar
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-xs bg-[#12131A] border border-white/15 rounded-3xl p-5 shadow-2xl">
+            <h3 className="font-extrabold text-base text-white mb-1 text-center">
+              Choose Stealth Avatar
             </h3>
-            <p className="text-xs text-zinc-400 mb-5">
-              Select your 3D confidential persona
+            <p className="text-xs text-zinc-400 mb-4 text-center">
+              Select your persona icon
             </p>
 
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              {[1, 2, 3, 4, 5, 6].map((id) => (
+            <div className="grid grid-cols-4 gap-3 mb-5">
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((id) => (
                 <button
                   key={id}
-                  onClick={() => handleSelectAvatar(id)}
-                  className={`p-2 rounded-2xl flex flex-col items-center justify-center transition-all active:scale-95 ${
+                  onClick={() => {
+                    setAvatarId(id);
+                    setShowAvatarModal(false);
+                  }}
+                  className={`p-2 rounded-2xl transition-all cursor-pointer ${
                     avatarId === id
-                      ? 'bg-[#D4FF00]/15 ring-2 ring-[#D4FF00] scale-105 shadow-md'
-                      : 'bg-white/[0.04] hover:bg-white/[0.08]'
+                      ? 'bg-[#00F5A0]/20 ring-2 ring-[#00F5A0]'
+                      : 'bg-white/5 hover:bg-white/10'
                   }`}
                 >
                   <Avatar avatarId={id} size="md" />
@@ -421,7 +468,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
             <button
               onClick={() => setShowAvatarModal(false)}
-              className="w-full py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-zinc-200 text-xs font-bold"
+              className="w-full py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold cursor-pointer"
             >
               Cancel
             </button>
@@ -429,103 +476,51 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
       )}
 
-      {/* Modal 2: Disappearing Messages Picker Modal */}
-      {showTimerModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-xs bg-[#0F121C] border border-white/[0.1] rounded-3xl p-5 shadow-2xl relative">
-            <button
-              onClick={() => setShowTimerModal(false)}
-              className="absolute top-4 right-4 p-1 rounded-full bg-white/[0.06] text-zinc-400 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
+      {/* Blocked Users Modal */}
+      {showBlockedModal && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-xs bg-[#12131A] border border-white/15 rounded-3xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <h3 className="font-extrabold text-sm text-white flex items-center gap-2">
+                <Shield className="w-4 h-4 text-rose-400" />
+                <span>Blocked Contacts</span>
+              </h3>
+              <button
+                onClick={() => setShowBlockedModal(false)}
+                className="p-1 rounded-full bg-white/5 text-zinc-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            <h3 className="font-extrabold text-base text-white mb-1">
-              Disappearing Messages
-            </h3>
-            <p className="text-xs text-zinc-400 mb-4">
-              Select how long messages stay before burning
-            </p>
-
-            <div className="space-y-2 mb-4">
-              {[
-                { label: '🔥 Burn on Read', desc: 'Destructs after reading', val: 0 },
-                { label: '⏱ 10 seconds', desc: 'Super fast burn', val: 10 },
-                { label: '⏱ 30 seconds', desc: 'Standard secret chat', val: 30 },
-                { label: '⏱ 1 minute', desc: 'Extended read time', val: 60 },
-              ].map((item) => (
-                <button
-                  key={item.label}
-                  onClick={() => {
-                    sound.vibrate(8);
-                    setDefaultTimer(item.val);
-                    setShowTimerModal(false);
-                  }}
-                  className={`w-full p-3 rounded-2xl flex items-center justify-between text-left transition-all ${
-                    defaultTimer === item.val
-                      ? 'bg-[#D4FF00]/15 border border-[#D4FF00]/40 text-[#D4FF00]'
-                      : 'bg-white/[0.03] border border-white/[0.06] text-white hover:bg-white/[0.06]'
-                  }`}
-                >
-                  <div>
-                    <span className="font-bold text-xs block">{item.label}</span>
-                    <span className="text-[10px] text-zinc-400 block">{item.desc}</span>
+            <div className="max-h-60 overflow-y-auto space-y-2">
+              {blockedUsers.length === 0 ? (
+                <p className="text-xs text-zinc-500 text-center py-4">No blocked contacts</p>
+              ) : (
+                blockedUsers.map((handle) => (
+                  <div
+                    key={handle}
+                    className="p-3 rounded-2xl bg-black/50 border border-white/10 flex items-center justify-between"
+                  >
+                    <span className="font-mono text-xs text-white">@{handle}</span>
+                    <button
+                      onClick={() => {
+                        if (onUnblockUser) onUnblockUser(handle);
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 text-xs font-bold active:scale-95 transition-all cursor-pointer"
+                    >
+                      Unblock
+                    </button>
                   </div>
-                  {defaultTimer === item.val && <Check className="w-4 h-4 text-[#D4FF00]" />}
-                </button>
-              ))}
+                ))
+              )}
             </div>
 
             <button
-              onClick={() => setShowTimerModal(false)}
-              className="w-full py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-zinc-200 text-xs font-bold"
+              onClick={() => setShowBlockedModal(false)}
+              className="w-full py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold cursor-pointer"
             >
               Done
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Modal 3: Personal QR Code Modal */}
-      {showQRModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 animate-fade-in">
-          <div className="w-full max-w-xs bg-[#0F121C] border border-white/[0.1] rounded-3xl p-6 text-center shadow-2xl relative">
-            <button
-              onClick={() => setShowQRModal(false)}
-              className="absolute top-4 right-4 p-1 rounded-full bg-white/[0.06] text-zinc-400 hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <h3 className="font-extrabold text-base text-white mb-0.5">
-              Personal QR Code
-            </h3>
-            <p className="text-xs text-zinc-400 mb-1 font-mono">
-              @{currentUser.handle}
-            </p>
-            <p className="text-xs text-[#D4FF00] font-mono font-bold mb-4">
-              Code: {formattedPin}
-            </p>
-
-            <div className="p-3.5 bg-white rounded-2xl mb-4 inline-block shadow-lg">
-              <QRCodeSVG
-                value={`https://blinkmsg.app/join/${myPin}`}
-                size={165}
-                bgColor="#ffffff"
-                fgColor="#000000"
-                level="M"
-              />
-            </div>
-
-            <p className="text-[11px] text-zinc-400 mb-4 leading-relaxed">
-              Scan this QR with the BlinkMsg camera scanner to connect directly.
-            </p>
-
-            <button
-              onClick={() => setShowQRModal(false)}
-              className="w-full py-2.5 rounded-xl bg-white/[0.08] hover:bg-white/[0.15] text-white text-xs font-bold active:scale-95 transition-all"
-            >
-              Close
             </button>
           </div>
         </div>
