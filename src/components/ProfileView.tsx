@@ -524,7 +524,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       <div className="text-center pb-8 space-y-1 text-zinc-500 text-[11px]">
         <div className="flex items-center justify-center gap-1.5 font-mono">
           <span className="text-zinc-400 font-bold">BlinkMsg</span>
-          <span>v1.0.0</span>
+          <span>v1.0.5</span>
           <span>•</span>
           <span className="text-[#00F5A0] font-semibold">Zero-Log Protocol</span>
         </div>
