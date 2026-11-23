@@ -656,6 +656,56 @@ export class NetworkService {
   }
 
   /**
+   * Check if a given @handle is available (not taken by another user)
+   */
+  static async checkHandleAvailability(handle: string): Promise<boolean> {
+    if (!supabase) return true;
+    const clean = handle.trim().toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_]/g, '');
+    if (!clean || clean.length < 3) return false;
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('handle', clean)
+        .maybeSingle();
+      return !data; // true if available, false if already taken
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * Check real-time online status of a peer
+   */
+  static async checkPeerOnlineStatus(handle: string): Promise<{ isOnline: boolean; lastSeenText: string }> {
+    if (!supabase || !handle) return { isOnline: false, lastSeenText: 'Offline' };
+    const clean = handle.trim().toLowerCase().replace(/^@/, '');
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('last_seen, is_available')
+        .eq('handle', clean)
+        .maybeSingle();
+      if (!data) return { isOnline: false, lastSeenText: 'Offline' };
+      if (data.is_available === false) return { isOnline: false, lastSeenText: 'Offline' };
+      if (!data.last_seen) return { isOnline: false, lastSeenText: 'Offline' };
+
+      const diffSec = Math.floor((Date.now() - new Date(data.last_seen).getTime()) / 1000);
+      if (diffSec < 120) { // active within last 2 minutes
+        return { isOnline: true, lastSeenText: 'Online' };
+      } else if (diffSec < 3600) {
+        return { isOnline: false, lastSeenText: `${Math.floor(diffSec / 60)}m ago` };
+      } else if (diffSec < 86400) {
+        return { isOnline: false, lastSeenText: `${Math.floor(diffSec / 3600)}h ago` };
+      } else {
+        return { isOnline: false, lastSeenText: 'Offline' };
+      }
+    } catch {
+      return { isOnline: false, lastSeenText: 'Offline' };
+    }
+  }
+
+  /**
    * Fetches recent direct message conversations for the current user's handle
    */
   static async fetchUserDirectMessages(userHandle: string): Promise<ChatRoom[]> {

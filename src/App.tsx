@@ -370,6 +370,15 @@ export const App: React.FC = () => {
   const [restorePinInput, setRestorePinInput] = useState<string>('');
   const [restoreSuccess, setRestoreSuccess] = useState<boolean>(false);
 
+  // Dedicated Onboarding Setup Form State (Unique Handle & Real Name)
+  const [setupDisplayName, setSetupDisplayName] = useState<string>(() => {
+    return StorageService.getProfile()?.displayName || '';
+  });
+  const [setupHandle, setSetupHandle] = useState<string>(() => {
+    return (StorageService.getProfile()?.handle || '').replace(/^@/, '');
+  });
+  const [handleCheckStatus, setHandleCheckStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
+
   // Sleek Popovers & Overlays
   const [showQrPinPopover, setShowQrPinPopover] = useState<boolean>(false);
   const [popoverTab, setPopoverTab] = useState<'qr' | 'pin' | 'connect'>('qr');
@@ -539,6 +548,69 @@ export const App: React.FC = () => {
     localStorage.setItem('blink_pending_requests', JSON.stringify(pendingRequests));
   }, [pendingRequests]);
 
+  // Live Debounced @Handle Availability Check for Setup / Onboarding
+  useEffect(() => {
+    const clean = setupHandle.trim().toLowerCase().replace(/^@/, '').replace(/[^a-z0-9_]/g, '');
+    if (!clean) {
+      setHandleCheckStatus('idle');
+      return;
+    }
+    if (clean.length < 3) {
+      setHandleCheckStatus('invalid');
+      return;
+    }
+    const currentMy = (StorageService.getProfile()?.handle || '').replace(/^@/, '').toLowerCase();
+    if (clean === currentMy && currentMy) {
+      setHandleCheckStatus('available');
+      return;
+    }
+    setHandleCheckStatus('checking');
+    const timer = setTimeout(async () => {
+      const isFree = await NetworkService.checkHandleAvailability(clean);
+      setHandleCheckStatus(isFree ? 'available' : 'taken');
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [setupHandle]);
+
+  // Real-Time Heartbeat: Keep current user's last_seen fresh while app is open
+  useEffect(() => {
+    if (ghostMode) return;
+    const sendHeartbeat = () => {
+      const p = StorageService.getProfile();
+      if (p) {
+        NetworkService.syncProfileToSupabase(p).catch(() => {});
+      }
+    };
+    sendHeartbeat();
+    const interval = setInterval(sendHeartbeat, 45000);
+    return () => clearInterval(interval);
+  }, [ghostMode]);
+
+  // Periodic Real-Time Peer Online Status Sync (every 15s)
+  useEffect(() => {
+    if (contacts.length === 0) return;
+    const checkPeerStatus = async () => {
+      let changed = false;
+      const updated = await Promise.all(
+        contacts.map(async (c) => {
+          const cleanH = c.handle.replace(/^@/, '').toLowerCase();
+          const { isOnline } = await NetworkService.checkPeerOnlineStatus(cleanH);
+          if (c.online !== isOnline) {
+            changed = true;
+            return { ...c, online: isOnline };
+          }
+          return c;
+        })
+      );
+      if (changed) {
+        setContacts(updated);
+      }
+    };
+    checkPeerStatus();
+    const interval = setInterval(checkPeerStatus, 15000);
+    return () => clearInterval(interval);
+  }, [contacts.length, screen, activeContactId]);
+
   // Sync profile to Supabase
   useEffect(() => {
     const clean = myHandle.replace(/^@/, '');
@@ -569,26 +641,7 @@ export const App: React.FC = () => {
       const isAltPrintScreen = e.altKey && e.key === 'PrintScreen';
 
       if (isPrintScreen || isWinSnip || isMacSnip || isAltPrintScreen) {
-        audio.play('alert');
-        setScreenshotToast('⚠️ Screenshot attempt recorded & blocked by Phantom Shield!');
-        setTimeout(() => setScreenshotToast(null), 4000);
-
-        const alertMsg: MessageItem = {
-          id: 'sys_' + Date.now(),
-          sender: 'system',
-          type: 'screenshot_alert',
-          text: `🛡️ Screenshot attempt by you blocked by Phantom Shield`,
-          seen: true,
-          totalSeconds: 60,
-          remainingSeconds: 60,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        };
-
-        setChats((prev) => ({
-          ...prev,
-          [activeContact.id]: [...(prev[activeContact.id] || []), alertMsg],
-        }));
-
+        // Silent Stealth: The taker sees NOTHING, but the peer receives encrypted alert!
         const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
         const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
         const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
@@ -1850,49 +1903,63 @@ export const App: React.FC = () => {
       return;
     }
 
-    // 3. Instant Connect: Create new cipher tunnel immediately
+    // 3. Instant Connect: Check real database registration
     let foundProfile: UserProfile | null = null;
     try {
       foundProfile = await NetworkService.findProfileByPin(rawTarget);
     } catch {}
 
-    const pCode = cleanDigits.length === 6 ? cleanDigits : (cleanDigits || '768049').slice(0, 6);
-    let partnerName = customName;
-    let partnerHandle = '';
-    let partnerCode = pCode;
-
-    if (foundProfile) {
-      partnerName = partnerName || foundProfile.displayName || foundProfile.handle;
-      partnerHandle = `@${foundProfile.handle.replace(/^@/, '')}`;
-      partnerCode = foundProfile.pin || pCode;
-    } else {
-      const isHandle = rawTarget.startsWith('@') || !cleanDigits;
-      if (isHandle) {
-        partnerHandle = `@${cleanHandle}`;
-        partnerName = partnerName || `${cleanHandle} ✨`;
-        partnerCode = handleToPin(cleanHandle).slice(0, 6);
-      } else {
-        partnerHandle = `@user_${pCode.slice(0, 4)}`;
-        partnerName = partnerName || `Partner #${pCode.slice(0, 3)}`;
-      }
+    const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+    if (foundProfile && foundProfile.handle.toLowerCase() === cleanMe) {
+      audio.play('alert');
+      setInAppBanner({
+        name: 'Invalid Connect',
+        code: myCode,
+        text: 'You cannot connect with your own code or handle!',
+      });
+      setTimeout(() => setInAppBanner(null), 3500);
+      return;
     }
 
+    // STRICT DB VALIDATION: If user is not found in database, do NOT create fake chat!
+    if (!foundProfile) {
+      audio.play('alert');
+      setInAppBanner({
+        name: 'User Not Found',
+        code: rawTarget,
+        text: `No registered user found with "${rawTarget}". Please verify the 6-digit code or @handle with your friend.`,
+      });
+      setTimeout(() => setInAppBanner(null), 4000);
+      return;
+    }
+
+    const pCode = foundProfile.pin || (cleanDigits.length === 6 ? cleanDigits : '768049');
+    const partnerName = customName || foundProfile.displayName || foundProfile.handle;
+    const partnerHandle = `@${foundProfile.handle.replace(/^@/, '')}`;
     const cleanPHandle = partnerHandle.replace(/^@/, '').toLowerCase();
     const newId = 'c_' + cleanPHandle;
+
+    // Check real-time online status from Supabase
+    let isPeerOnline = false;
+    try {
+      const statusRes = await NetworkService.checkPeerOnlineStatus(cleanPHandle);
+      isPeerOnline = statusRes.isOnline;
+    } catch {}
+
     const newContact: ContactItem = {
       id: newId,
       name: partnerName,
       handle: partnerHandle,
-      code: partnerCode,
-      avatar: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=150&auto=format&fit=crop&q=80',
+      code: pCode,
+      avatar: '',
+      avatarId: foundProfile.avatarId || 1,
       color: 'from-emerald-500 to-teal-500',
-      online: true,
+      online: isPeerOnline,
       unread: 0,
       time: 'Now',
     };
 
     // Broadcast notice to peer's inbox so peer adds me to their contacts too!
-    const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
     const myRealName = StorageService.getProfile()?.displayName || myHandle.replace(/^@/, '');
     NetworkService.sendPeerConnectedNotice(cleanPHandle, {
       id: 'usr_' + cleanMe,
@@ -2129,31 +2196,71 @@ export const App: React.FC = () => {
                 </span>
               </div>
 
-              {/* Handle & 4-Digit Recovery PIN Row */}
-              <div className="grid grid-cols-2 gap-2.5 pt-0.5">
+              {/* Display Name & Handle Inputs */}
+              <div className="space-y-2.5 pt-0.5">
+                {/* 1. Real / Display Name */}
                 <div className="bg-black/50 border border-white/10 rounded-2xl px-3.5 py-2.5 focus-within:border-[#00F5A0]/50 transition-colors">
                   <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
-                    Your @Handle
+                    Your Name / Display Alias
                   </label>
                   <input
                     type="text"
-                    value={myHandle}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setMyHandle(val);
-                    }}
+                    value={setupDisplayName}
+                    onChange={(e) => setSetupDisplayName(e.target.value)}
+                    placeholder="e.g. Alex or Vikram"
                     className="w-full bg-transparent text-[13px] font-semibold text-white focus:outline-none mt-0.5"
                   />
                 </div>
+
+                {/* 2. Unique @Handle with Live Uniqueness Check */}
+                <div className={`bg-black/50 border rounded-2xl px-3.5 py-2.5 transition-colors ${
+                  handleCheckStatus === 'available' ? 'border-[#00F5A0]/60' :
+                  handleCheckStatus === 'taken' ? 'border-rose-500/60' :
+                  handleCheckStatus === 'invalid' ? 'border-amber-500/50' : 'border-white/10 focus-within:border-[#00F5A0]/50'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
+                      Unique Anonymous @Handle
+                    </label>
+                    {handleCheckStatus === 'checking' && (
+                      <span className="text-[10px] text-amber-400 font-medium">Checking DB...</span>
+                    )}
+                    {handleCheckStatus === 'available' && (
+                      <span className="text-[10px] text-[#00F5A0] font-bold">✓ Unique & Available</span>
+                    )}
+                    {handleCheckStatus === 'taken' && (
+                      <span className="text-[10px] text-rose-400 font-bold">❌ Already Taken!</span>
+                    )}
+                    {handleCheckStatus === 'invalid' && (
+                      <span className="text-[10px] text-amber-400 font-medium">Min 3 chars</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-zinc-500 font-bold text-sm">@</span>
+                    <input
+                      type="text"
+                      value={setupHandle}
+                      onChange={(e) => setSetupHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                      placeholder="choose_handle"
+                      className="w-full bg-transparent text-[13px] font-semibold text-white focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. 4-Digit Recovery PIN */}
                 <div className="bg-black/50 border border-white/10 rounded-2xl px-3.5 py-2.5 focus-within:border-[#00F5A0]/50 transition-colors">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
-                    4-Digit PIN
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 block">
+                      4-Digit App Lock & Recovery PIN
+                    </label>
+                    <span className="text-[9px] text-zinc-500">Decoy PIN: 0000</span>
+                  </div>
                   <input
-                    type="text"
+                    type="password"
                     maxLength={4}
                     value={recoveryPin}
                     onChange={(e) => setRecoveryPin(e.target.value.replace(/\D/g, ''))}
+                    placeholder="••••"
                     className="w-full bg-transparent font-mono text-[14px] font-bold tracking-widest text-[#00F5A0] focus:outline-none mt-0.5"
                   />
                 </div>
@@ -2165,20 +2272,24 @@ export const App: React.FC = () => {
                 className="w-full py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-[#00F5A0] flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isGeneratingId ? 'animate-spin' : ''}`} />
-                <span>Reroll Random Identity</span>
+                <span>Reroll 6-Digit PIN</span>
               </button>
             </div>
 
             {/* Primary CTA & Restore Account Trigger */}
             <div className="relative z-10 space-y-3 pb-2">
               <button
+                disabled={!setupDisplayName.trim() || handleCheckStatus !== 'available' || recoveryPin.length !== 4}
                 onClick={() => {
                   audio.play('send');
-                  const cleanHandle = myHandle.replace(/^@/, '').toLowerCase().trim();
+                  const cleanHandle = setupHandle.replace(/^@/, '').toLowerCase().trim();
+                  const cleanName = setupDisplayName.trim();
+                  setMyHandle(`@${cleanHandle}`);
+                  const currentCode = myCode.replace(/\D/g, '');
                   const prof = {
                     id: 'usr_' + cleanHandle,
                     handle: cleanHandle,
-                    displayName: cleanHandle,
+                    displayName: cleanName,
                     avatarId: 1,
                     vibe: '⚡ Stealth Active',
                     isAvailable: true,
@@ -2186,13 +2297,15 @@ export const App: React.FC = () => {
                     state: 'Delhi',
                     city: 'New Delhi',
                     lastActive: Date.now(),
-                    pin: recoveryPin,
+                    pin: currentCode,
                   };
                   StorageService.saveProfile(prof);
+                  localStorage.setItem('blink_recovery_pin', recoveryPin);
+                  localStorage.setItem('blink_user_code', currentCode);
                   NetworkService.syncProfileToSupabase(prof).catch(() => {});
                   setScreen('list');
                 }}
-                className="w-full py-3.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-black font-extrabold text-[13px] shadow-[0_10px_30px_rgba(0,245,160,0.3)] transition-all cursor-pointer active:scale-95"
+                className="w-full py-3.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] disabled:opacity-40 disabled:cursor-not-allowed text-black font-extrabold text-[13px] shadow-[0_10px_30px_rgba(0,245,160,0.3)] transition-all cursor-pointer active:scale-95"
               >
                 Enter Stealth Messenger →
               </button>
@@ -2411,15 +2524,12 @@ export const App: React.FC = () => {
 
                 {/* Error / Not Found Status */}
                 {targetSearchError && !searchTargetProfile && (
-                  <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between gap-2">
-                    <p className="text-xs text-amber-300">{targetSearchError}</p>
-                    <button
-                      type="button"
-                      onClick={() => handleConnectFriend()}
-                      className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-950 text-xs font-bold shrink-0 cursor-pointer active:scale-95 transition-all"
-                    >
-                      Connect anyway
-                    </button>
+                  <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/25 flex items-start gap-2.5">
+                    <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-rose-300 leading-snug">{targetSearchError}</p>
+                      <p className="text-[11px] text-zinc-400 mt-1">Make sure your friend has opened BlinkMsg and shared their verified 6-digit PIN.</p>
+                    </div>
                   </div>
                 )}
               </div>
@@ -2796,9 +2906,11 @@ export const App: React.FC = () => {
                     ) : ghostMode ? (
                       <span className="text-violet-300 font-medium">👻 Ghost Cloaked</span>
                     ) : (
-                      <span className="text-zinc-400 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80 inline-block" />
-                        <span>Timer on Seen</span>
+                      <span className="text-zinc-400 flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full ${activeContact.online && !ghostMode ? 'bg-[#00F5A0] shadow-[0_0_8px_rgba(0,245,160,0.8)]' : 'bg-zinc-600'}`} />
+                        <span className={activeContact.online && !ghostMode ? 'text-[#00F5A0] font-medium' : 'text-zinc-400'}>
+                          {activeContact.online && !ghostMode ? 'Online' : 'Offline'}
+                        </span>
                       </span>
                     )}
                   </div>
