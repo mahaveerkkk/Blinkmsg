@@ -13,21 +13,18 @@ import {
   Lock,
   RefreshCw,
   Trash2,
-  KeyRound,
   User,
   AtSign,
   X,
+  ShieldCheck,
+  Fingerprint,
+  Radio,
+  Sliders,
+  AlertTriangle,
 } from 'lucide-react';
 import { UserProfile } from '../types';
-import { Avatar } from './Avatar';
+import { Avatar, SUPABASE_AVATARS } from './Avatar';
 import { sound } from '../services/sound';
-import { StorageService } from '../services/storage';
-import {
-  AVATARS_LIST,
-  AVATAR_CATEGORIES,
-  AvatarCategory,
-  getAvatarById,
-} from '../data/avatars';
 
 interface ProfileViewProps {
   currentUser: UserProfile;
@@ -63,8 +60,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [displayName, setDisplayName] = useState(currentUser.displayName || currentUser.handle);
   const [handle, setHandle] = useState(currentUser.handle);
   const [avatarId, setAvatarId] = useState(currentUser.avatarId || 1);
-  const [tempAvatarId, setTempAvatarId] = useState<number>(currentUser.avatarId || 1);
-  const [selectedCategory, setSelectedCategory] = useState<AvatarCategory>('Auras');
+  const [tempAvatarId, setTempAvatarId] = useState(avatarId);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showPinMasked, setShowPinMasked] = useState(true);
@@ -73,6 +69,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [pinUpdateSuccess, setPinUpdateSuccess] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [autoLockEnabled, setAutoLockEnabled] = useState<boolean>(() => {
     return localStorage.getItem('blink_app_lock_enabled') === 'true';
   });
@@ -85,7 +82,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   const myPin = currentUser.pin || localStorage.getItem('blink_user_code') || '768049';
-  const formattedPin = myPin.length === 6 ? `${myPin.slice(0, 3)} ${myPin.slice(3)}` : myPin;
+  const formattedPinPart1 = myPin.slice(0, 3);
+  const formattedPinPart2 = myPin.slice(3, 6);
 
   const handleCopyPin = () => {
     navigator.clipboard?.writeText(myPin);
@@ -120,44 +118,73 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     }
   };
 
+  const selectedAvatarMeta = SUPABASE_AVATARS[avatarId - 1] || SUPABASE_AVATARS[0];
+
   return (
     <div className="pb-36 pt-4 px-4 max-w-md mx-auto select-none font-sans min-h-screen bg-[#07080B] text-white">
       {/* Top Header */}
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="font-extrabold text-2xl tracking-tight text-white flex items-center gap-2">
-            <span>Settings</span>
-            <span className="w-2 h-2 rounded-full bg-[#00F5A0] shadow-[0_0_8px_#00F5A0]" />
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="font-extrabold text-2xl tracking-tight text-white">
+              Settings & Vault
+            </h1>
+            <span className="w-2 h-2 rounded-full bg-[#00F5A0] shadow-[0_0_10px_#00F5A0] animate-pulse" />
+          </div>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Identity, Stealth & Security Controls
+            Stealth Identity & Device Encryption
           </p>
+        </div>
+        <div className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-mono text-[#00F5A0] font-bold flex items-center gap-1.5 shadow-sm">
+          <ShieldCheck className="w-3.5 h-3.5 text-[#00F5A0]" />
+          <span>AES-256</span>
         </div>
       </div>
 
-      {/* 1. Profile Avatar & Name Card */}
-      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 text-center relative">
-        <div
-          className="relative inline-block mx-auto mb-3 cursor-pointer group"
-          onClick={() => {
-            setTempAvatarId(avatarId);
-            setShowAvatarModal(true);
-          }}
-        >
-          <div className="ring-2 ring-white/10 group-hover:ring-[#00F5A0]/50 rounded-full p-1 transition-all">
-            <Avatar avatarId={avatarId} size="xl" name={currentUser.handle} />
-          </div>
-          <button
-            type="button"
-            className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#00F5A0] text-zinc-950 flex items-center justify-center shadow-lg active:scale-90 transition-transform cursor-pointer"
-            title="Change Avatar"
+      {/* 1. Hero Identity & Persona Card */}
+      <div className="rounded-3xl bg-gradient-to-b from-[#13151F] to-[#0E1017] border border-white/[0.08] p-5 shadow-2xl mb-4 relative overflow-hidden">
+        {/* Subtle glow orb */}
+        <div className="absolute top-0 right-1/2 translate-x-1/2 w-48 h-32 bg-[#00F5A0]/5 blur-3xl pointer-events-none" />
+
+        <div className="relative flex flex-col items-center text-center">
+          {/* Avatar with Interactive Glow & Edit Pill */}
+          <div
+            className="relative mb-3 cursor-pointer group"
+            onClick={() => {
+              sound.vibrate(6);
+              setTempAvatarId(avatarId);
+              setShowAvatarModal(true);
+            }}
           >
-            <Camera className="w-4 h-4 stroke-[2.5]" />
-          </button>
+            <div className="p-1 rounded-full bg-gradient-to-tr from-[#00F5A0]/40 via-purple-500/30 to-sky-400/30 ring-2 ring-white/10 group-hover:ring-[#00F5A0]/60 transition-all shadow-xl">
+              <Avatar avatarId={avatarId} size="xl" name={displayName || handle} />
+            </div>
+
+            <button
+              type="button"
+              className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-[#00F5A0] text-zinc-950 flex items-center justify-center shadow-lg active:scale-90 transition-transform cursor-pointer border-2 border-[#0E1017]"
+              title="Change 3D Avatar"
+            >
+              <Camera className="w-3.5 h-3.5 stroke-[2.5]" />
+            </button>
+          </div>
+
+          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-[11px] font-semibold text-zinc-300 mb-2">
+            <span>Persona:</span>
+            <span className="text-[#00F5A0] font-bold">{selectedAvatarMeta.name}</span>
+          </div>
+
+          <h2 className="text-lg font-black text-white tracking-tight">
+            {displayName || 'Stealth User'}
+          </h2>
+          <span className="font-mono text-xs text-[#00F5A0] font-bold">
+            @{handle}
+          </span>
         </div>
 
-        <div className="space-y-3 max-w-xs mx-auto text-left">
-          {/* Display Name Input */}
+        {/* Inputs Section */}
+        <div className="space-y-3 mt-4 pt-4 border-t border-white/[0.06]">
+          {/* Display Name */}
           <div>
             <label className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block mb-1">
               Display Name
@@ -174,7 +201,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </div>
 
-          {/* Anonymous @Handle Input */}
+          {/* Anonymous Handle */}
           <div>
             <label className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider block mb-1">
               Anonymous @Handle
@@ -191,51 +218,60 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </div>
 
+          {/* Save Profile Button */}
           <button
             onClick={handleSaveProfile}
-            className="w-full py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-md shadow-[#00F5A0]/20 cursor-pointer"
+            className="w-full py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-extrabold text-xs flex items-center justify-center gap-1.5 active:scale-95 transition-all shadow-md shadow-[#00F5A0]/20 cursor-pointer"
           >
-            {saveSuccess ? <Check className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+            {saveSuccess ? <Check className="w-4 h-4 stroke-[3]" /> : <Sparkles className="w-4 h-4" />}
             <span>{saveSuccess ? 'Profile Saved Successfully!' : 'Save Profile Changes'}</span>
           </button>
         </div>
       </div>
 
       {/* 2. Permanent 6-Digit Stealth PIN Card */}
-      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-3">
+      <div className="rounded-3xl bg-gradient-to-b from-[#13151F] to-[#0E1017] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">
-            Permanent 6-Digit Connection PIN
-          </span>
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-[#00F5A0]" />
+            <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">
+              Connection PIN
+            </span>
+          </div>
           <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/10 border border-[#00F5A0]/25 px-2 py-0.5 rounded-full font-bold">
-            Zero-Login
+            Zero-Login ID
           </span>
         </div>
 
-        <div className="p-3.5 rounded-2xl bg-black/60 border border-white/10 flex items-center justify-between shadow-inner">
+        <div className="p-4 rounded-2xl bg-black/60 border border-white/10 flex items-center justify-between shadow-inner">
           <div>
-            <span className="font-mono text-2xl font-black text-[#00F5A0] tracking-widest">
-              {formattedPin}
-            </span>
-            <span className="text-[11px] text-zinc-400 block mt-0.5">
-              Friends can use this code to connect & chat
+            <div className="flex items-center gap-2 font-mono text-2xl font-black text-[#00F5A0] tracking-widest">
+              <span>{formattedPinPart1}</span>
+              <span className="text-zinc-600 text-lg">•</span>
+              <span>{formattedPinPart2}</span>
+            </div>
+            <span className="text-[11px] text-zinc-400 block mt-1">
+              Give this 6-digit code to friends to connect & chat
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={handleCopyPin}
-              className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer"
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-all cursor-pointer ${
+                copiedPin
+                  ? 'bg-[#00F5A0] text-zinc-950 shadow-md shadow-[#00F5A0]/30'
+                  : 'bg-white/10 hover:bg-white/15 text-white'
+              }`}
             >
-              {copiedPin ? <Check className="w-3.5 h-3.5 text-[#00F5A0]" /> : <Copy className="w-3.5 h-3.5" />}
+              {copiedPin ? <Check className="w-3.5 h-3.5 stroke-[2.5]" /> : <Copy className="w-3.5 h-3.5" />}
               <span>{copiedPin ? 'Copied' : 'Copy'}</span>
             </button>
 
             <button
               onClick={() => {
-                if (confirm('Regenerate your 6-digit connection PIN? Past invite codes will no longer connect.')) {
-                  onRegenerateCode();
-                }
+                sound.vibrate(8);
+                setShowRegenConfirm(true);
               }}
               className="p-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/25 active:scale-95 transition-all cursor-pointer"
               title="Regenerate PIN"
@@ -244,15 +280,46 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
           </div>
         </div>
+
+        {showRegenConfirm && (
+          <div className="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-2 animate-in fade-in">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] text-amber-200 leading-snug">
+                Regenerating will disconnect previous invite links and assign you a new 6-digit code.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                onClick={() => {
+                  onRegenerateCode();
+                  setShowRegenConfirm(false);
+                }}
+                className="py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-zinc-950 font-bold text-xs cursor-pointer active:scale-95 transition-all"
+              >
+                Yes, Regenerate
+              </button>
+              <button
+                onClick={() => setShowRegenConfirm(false)}
+                className="py-1.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-medium text-xs cursor-pointer active:scale-95 transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 3. 4-Digit Security & App Lock PIN */}
-      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-3">
+      {/* 3. 4-Digit Master Lock PIN */}
+      <div className="rounded-3xl bg-gradient-to-b from-[#13151F] to-[#0E1017] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">
-            4-Digit Master Lock & Recovery PIN
-          </span>
-          <span className="text-[10px] font-mono text-zinc-400">Security</span>
+          <div className="flex items-center gap-2">
+            <Lock className="w-4 h-4 text-[#00F5A0]" />
+            <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">
+              4-Digit Master App Lock
+            </span>
+          </div>
+          <span className="text-[10px] font-mono text-zinc-400">Recovery & Lock</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -283,16 +350,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </button>
         </div>
 
-        <p className="text-[11px] text-zinc-500 leading-relaxed">
-          Decoy PIN: <span className="text-amber-400 font-mono font-bold">0000</span> (Entering 0000 on lock screen opens safe decoy chats).
-        </p>
+        <div className="p-2.5 rounded-2xl bg-white/[0.04] border border-white/5 flex items-center justify-between text-[11px] text-zinc-400">
+          <span>Decoy PIN Protection:</span>
+          <span className="font-mono font-bold text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-lg">
+            0000 (Safe decoy chats)
+          </span>
+        </div>
       </div>
 
-      {/* 4. Privacy & Stealth Toggles */}
-      <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-4">
-        <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400 block">
-          Stealth & System Preferences
-        </span>
+      {/* 4. Stealth & System Preferences */}
+      <div className="rounded-3xl bg-gradient-to-b from-[#13151F] to-[#0E1017] border border-white/[0.08] p-5 shadow-2xl mb-4 space-y-4">
+        <div className="flex items-center gap-2">
+          <Sliders className="w-4 h-4 text-[#00F5A0]" />
+          <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-400">
+            Stealth & System Preferences
+          </span>
+        </div>
 
         {/* Ghost Mode Toggle */}
         <div className="flex items-center justify-between">
@@ -350,7 +423,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <div className="flex items-center justify-between pt-2 border-t border-white/[0.06]">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
-              <Lock className="w-4 h-4" />
+              <Fingerprint className="w-4 h-4" />
             </div>
             <div>
               <span className="text-xs font-bold text-white block">Auto-Lock When Hidden</span>
@@ -396,7 +469,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
             <div>
               <span className="text-xs font-bold text-white block">Blocked Contacts</span>
-              <span className="text-[11px] text-zinc-400 block">{blockedUsers.length} user{blockedUsers.length === 1 ? '' : 's'} blocked</span>
+              <span className="text-[11px] text-zinc-400 block">{blockedUsers.length} contact{blockedUsers.length === 1 ? '' : 's'} blocked</span>
             </div>
           </div>
 
@@ -411,7 +484,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       </div>
 
       {/* 5. Danger Zone */}
-      <div className="rounded-3xl bg-rose-500/10 border border-rose-500/20 p-5 shadow-2xl space-y-3">
+      <div className="rounded-3xl bg-rose-500/10 border border-rose-500/20 p-5 shadow-2xl space-y-3 mb-6">
         <span className="text-[10px] uppercase tracking-wider font-bold text-rose-300 block">
           Danger Zone
         </span>
@@ -447,101 +520,83 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         )}
       </div>
 
-      {/* 100 Stealth Avatar Picker Modal */}
+      {/* Build & Protocol Info Badge */}
+      <div className="text-center pb-8 space-y-1 text-zinc-500 text-[11px]">
+        <div className="flex items-center justify-center gap-1.5 font-mono">
+          <span className="text-zinc-400 font-bold">BlinkMsg</span>
+          <span>v1.0.0</span>
+          <span>•</span>
+          <span className="text-[#00F5A0] font-semibold">Zero-Log Protocol</span>
+        </div>
+        <p className="text-[10px] text-zinc-600">
+          Hardware AES-256-GCM • E2EE WebRTC • AMOLED Stealth
+        </p>
+      </div>
+
+      {/* 3D Cyberpunk Avatar Picker Modal */}
       {showAvatarModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-2xl flex items-center justify-center p-3 animate-in fade-in">
-          <div className="w-full max-w-sm bg-[#12131A] border border-white/15 rounded-3xl p-4 shadow-2xl flex flex-col max-h-[85vh]">
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-sm bg-[#12131C] border border-white/15 rounded-3xl p-5 shadow-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between mb-2">
               <div>
-                <h3 className="font-extrabold text-sm text-white flex items-center gap-1.5">
-                  <span>100 Stealth Avatars</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#00F5A0]/10 text-[#00F5A0] border border-[#00F5A0]/30 font-mono font-bold">
-                    #{tempAvatarId}
-                  </span>
+                <h3 className="font-black text-base text-white">
+                  Choose Stealth Persona
                 </h3>
-                <p className="text-[11px] text-zinc-400">
-                  Select your encrypted persona icon
+                <p className="text-xs text-zinc-400">
+                  Select your 3D cyberpunk avatar
                 </p>
               </div>
               <button
-                type="button"
                 onClick={() => setShowAvatarModal(false)}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                className="p-1.5 rounded-full bg-white/5 text-zinc-400 hover:text-white cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Currently Active / Previewing Avatar Card */}
+            {/* Live Preview Card */}
             {(() => {
-              const preview = getAvatarById(tempAvatarId);
+              const previewMeta = SUPABASE_AVATARS[tempAvatarId - 1] || SUPABASE_AVATARS[0];
               return (
-                <div className="p-2.5 mb-2.5 rounded-2xl bg-black/60 border border-white/10 flex items-center gap-3">
-                  <Avatar avatarId={tempAvatarId} size="md" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-white truncate">
-                        {preview.name}
-                      </span>
-                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/10 text-zinc-300">
-                        #{preview.id}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-zinc-400 block mt-0.5 font-medium">
-                      Category: <span className="text-[#00F5A0] font-bold">{preview.category}</span>
+                <div className="p-3 my-3 rounded-2xl bg-black/60 border border-white/10 flex items-center gap-3 shadow-inner">
+                  <div className="p-0.5 rounded-full ring-2 ring-[#00F5A0]/50">
+                    <Avatar avatarId={tempAvatarId} size="lg" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-mono font-bold text-[#00F5A0] block">
+                      #{tempAvatarId} • {previewMeta.name}
+                    </span>
+                    <span className="text-[10px] text-zinc-400">
+                      Cloud synced & visible to peers
                     </span>
                   </div>
                 </div>
               );
             })()}
 
-            {/* Category Tabs */}
-            <div className="grid grid-cols-4 gap-1 p-1 bg-black/70 rounded-2xl border border-white/5 mb-2.5">
-              {AVATAR_CATEGORIES.map((cat) => {
-                const isActive = selectedCategory === cat;
-                return (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => {
-                      sound.vibrate(6);
-                      setSelectedCategory(cat);
-                    }}
-                    className={`py-1 text-[10px] font-bold rounded-xl transition-all cursor-pointer text-center ${
-                      isActive
-                        ? 'bg-[#00F5A0] text-zinc-950 shadow-md shadow-[#00F5A0]/20'
-                        : 'text-zinc-400 hover:text-white'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* 25-avatar grid per category (5 columns) */}
-            <div className="overflow-y-auto flex-1 pr-1 space-y-2 max-h-64 scrollbar-thin">
-              <div className="grid grid-cols-5 gap-2 pb-2">
-                {AVATARS_LIST.filter((a) => a.category === selectedCategory).map((item) => {
-                  const isSelected = tempAvatarId === item.id;
+            {/* 4x2 Grid of Avatars */}
+            <div className="overflow-y-auto flex-1 py-1 pr-1">
+              <div className="grid grid-cols-4 gap-2.5">
+                {SUPABASE_AVATARS.map((av) => {
+                  const isSelected = tempAvatarId === av.id;
                   return (
                     <button
-                      key={item.id}
+                      key={av.id}
                       type="button"
                       onClick={() => {
                         sound.vibrate(8);
-                        setTempAvatarId(item.id);
+                        setTempAvatarId(av.id);
                       }}
-                      className={`relative p-1 rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${
+                      className={`relative p-2 rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${
                         isSelected
                           ? 'bg-[#00F5A0]/20 ring-2 ring-[#00F5A0] scale-105 shadow-lg shadow-[#00F5A0]/20'
                           : 'bg-white/5 hover:bg-white/10 active:scale-95'
                       }`}
-                      title={item.name}
+                      title={av.name}
                     >
-                      <Avatar avatarId={item.id} size="sm" />
-                      <span className="text-[9px] font-mono text-zinc-400 mt-1 font-bold">
-                        #{item.id}
+                      <Avatar avatarId={av.id} size="md" />
+                      <span className="text-[9px] font-mono text-zinc-300 mt-1 font-bold text-center line-clamp-1">
+                        {av.name.split(' ')[1] || av.name}
                       </span>
                     </button>
                   );
@@ -550,7 +605,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
 
             {/* Action Buttons */}
-            <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-white/10">
+            <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-white/10">
               <button
                 type="button"
                 onClick={() => setShowAvatarModal(false)}
@@ -566,9 +621,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   setAvatarId(tempAvatarId);
                   setShowAvatarModal(false);
                 }}
-                className="py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 text-xs font-extrabold shadow-lg shadow-[#00F5A0]/20 active:scale-95 transition-all cursor-pointer"
+                className="py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 text-xs font-black shadow-lg shadow-[#00F5A0]/20 active:scale-95 transition-all cursor-pointer"
               >
-                Use Avatar #{tempAvatarId}
+                Use Persona #{tempAvatarId}
               </button>
             </div>
           </div>

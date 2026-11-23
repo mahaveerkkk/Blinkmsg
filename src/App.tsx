@@ -4,7 +4,6 @@ import {
   QrCode,
   Flame,
   Lock,
-  Ghost,
   Mic,
   Image as ImageIcon,
   ArrowUp,
@@ -18,19 +17,14 @@ import {
   Clock,
   Camera,
   Play,
-  Volume2,
-  VolumeX,
-  Eye,
   Shield,
   X,
-  Bell,
   CheckCheck,
   Zap,
   CornerUpLeft,
   UserPlus,
   KeyRound,
   ShieldAlert,
-  Wand2,
   Trash2,
   Settings,
   MoreVertical,
@@ -38,14 +32,14 @@ import {
   UserMinus,
 } from 'lucide-react';
 import { StorageService } from './services/storage';
-import { NetworkService, supabase, handleToPin } from './services/network';
+import { NetworkService, handleToPin } from './services/network';
 import { CryptoService } from './services/crypto';
 import { QRScannerModal } from './components/QRScannerModal';
 import { BottomNav } from './components/BottomNav';
 import { SecretVaultView } from './components/SecretVaultView';
 import { ProfileView } from './components/ProfileView';
 import { Avatar } from './components/Avatar';
-import { UserProfile, ActiveTab, ChatRoom } from './types';
+import { UserProfile, ActiveTab } from './types';
 import { QRCodeSVG } from 'qrcode.react';
 import { App as CapApp } from '@capacitor/app';
 
@@ -138,33 +132,6 @@ class TactileSound {
 
 const audio = new TactileSound();
 
-// ==========================================
-// PRESET EPHEMERAL PHOTOS & REQUESTS
-// ==========================================
-const EPHEMERAL_PHOTO_PRESETS = [
-  {
-    id: 'ep1',
-    title: 'Neon Shibuya Rain',
-    caption: 'Midnight Cyber Walk 🌧️⚡',
-    gradient: 'from-indigo-600/50 via-purple-600/40 to-emerald-500/40',
-    previewUrl: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=400&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'ep2',
-    title: 'Late Night Espresso',
-    caption: 'Secret Cafe Meet ☕🤫',
-    gradient: 'from-amber-500/40 via-rose-500/40 to-indigo-600/40',
-    previewUrl: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=400&auto=format&fit=crop&q=80',
-  },
-  {
-    id: 'ep3',
-    title: 'Encrypted Vault Key',
-    caption: 'Hardware Seed Snapshot 🔐',
-    gradient: 'from-emerald-500/40 via-cyan-500/40 to-blue-600/40',
-    previewUrl: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=400&auto=format&fit=crop&q=80',
-  },
-];
-
 interface ContactItem {
   id: string;
   name: string;
@@ -209,8 +176,6 @@ interface HandshakeRequest {
   via: string;
   time: string;
 }
-
-const INITIAL_REQUESTS: HandshakeRequest[] = [];
 
 const DECOY_CONTACTS: ContactItem[] = [
   {
@@ -270,9 +235,6 @@ const DECOY_CHATS: Record<string, MessageItem[]> = {
 
 const DEFAULT_CONTACTS: ContactItem[] = [];
 const DEFAULT_CHATS: Record<string, MessageItem[]> = {};
-
-const INITIAL_CONTACTS: ContactItem[] = DEFAULT_CONTACTS;
-const INITIAL_CHATS: Record<string, MessageItem[]> = DEFAULT_CHATS;
 
 export const App: React.FC = () => {
   // Navigation: 'onboarding' | 'list' | 'chat'
@@ -348,7 +310,6 @@ export const App: React.FC = () => {
   const [decoyModeActive, setDecoyModeActive] = useState<boolean>(false);
   const [ghostMode, setGhostMode] = useState<boolean>(false);
   const [muted, setMuted] = useState<boolean>(false);
-  const [autoSeenSim, setAutoSeenSim] = useState<boolean>(false);
   const [screenshotToast, setScreenshotToast] = useState<string | null>(null);
 
   // Blocked Users & Contact Actions State
@@ -389,8 +350,9 @@ export const App: React.FC = () => {
   const [searchTargetProfile, setSearchTargetProfile] = useState<UserProfile | null>(null);
   const [isSearchingTarget, setIsSearchingTarget] = useState<boolean>(false);
   const [targetSearchError, setTargetSearchError] = useState<string | null>(null);
-  const [handshakeSentToast, setHandshakeSentToast] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchUserResult, setSearchUserResult] = useState<UserProfile | null>(null);
+  const [isSearchingUser, setIsSearchingUser] = useState<boolean>(false);
   const [showCameraModal, setShowCameraModal] = useState<boolean>(false);
 
   // Disclaimer Popup on Regenerating Code
@@ -440,8 +402,6 @@ export const App: React.FC = () => {
   const [replyingTo, setReplyingTo] = useState<MessageItem | null>(null);
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
   const [showSendEffectMenu, setShowSendEffectMenu] = useState<boolean>(false);
-  const [showPhotoPicker, setShowPhotoPicker] = useState<boolean>(false);
-  const [customPhotoCaption, setCustomPhotoCaption] = useState<string>('');
 
   // Interactive Bubble States
   const [revealedIds, setRevealedIds] = useState<Record<string, boolean>>({});
@@ -994,6 +954,58 @@ export const App: React.FC = () => {
     return () => clearTimeout(timer);
   }, [connectCodeInput, showConnectSheet, myHandle]);
 
+  // Live Peer Lookup when searching 6-digit PIN or @handle in Chats List
+  useEffect(() => {
+    const raw = searchQuery.trim();
+    const cleanDigits = raw.replace(/\D/g, '');
+    const cleanHandle = raw.replace(/^@/, '').toLowerCase().trim();
+
+    // Only search network if user typed an exact 6-digit PIN OR a handle with @ or >= 4 chars
+    const isExactPin = cleanDigits.length === 6;
+    const isSpecificHandle = (raw.startsWith('@') && cleanHandle.length >= 3) || cleanHandle.length >= 4;
+
+    if (!isExactPin && !isSpecificHandle) {
+      setSearchUserResult(null);
+      setIsSearchingUser(false);
+      return;
+    }
+
+    const myClean = myHandle.replace(/^@/, '').toLowerCase();
+    if (cleanHandle === myClean || (isExactPin && cleanDigits === myCode.replace(/\D/g, ''))) {
+      setSearchUserResult(null);
+      setIsSearchingUser(false);
+      return;
+    }
+
+    // If already in contacts, local contact list already displays them
+    const isAlreadyContact = contacts.some(
+      (c) => c.code.replace(/\D/g, '') === cleanDigits || c.handle.replace(/^@/, '').toLowerCase() === cleanHandle
+    );
+    if (isAlreadyContact) {
+      setSearchUserResult(null);
+      setIsSearchingUser(false);
+      return;
+    }
+
+    setIsSearchingUser(true);
+    const timer = setTimeout(async () => {
+      try {
+        const found = await NetworkService.findProfileByPin(raw);
+        if (found && found.handle.toLowerCase() !== myClean) {
+          setSearchUserResult(found);
+        } else {
+          setSearchUserResult(null);
+        }
+      } catch {
+        setSearchUserResult(null);
+      } finally {
+        setIsSearchingUser(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, myHandle, myCode, contacts]);
+
   // Live Supabase Room Subscription (Messages, Typing, Delivery ACK, Screenshot Alerts)
   useEffect(() => {
     if (screen !== 'chat' || !activeContact || decoyModeActive || activeContact.id === 'placeholder') {
@@ -1442,14 +1454,6 @@ export const App: React.FC = () => {
         );
       })().catch(() => {});
     }
-
-    // If Auto-Seen simulation is ON, partner reads the message after 2.0 seconds
-    if (autoSeenSim && !chosenShield) {
-      setTimeout(() => {
-        markMessageSeen(activeContact.id, newId);
-      }, 2000);
-    }
-
   };
 
   // Toggle Emoji Reaction on Message
@@ -1476,28 +1480,6 @@ export const App: React.FC = () => {
       const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
       NetworkService.broadcastReaction(normRoomId, msgId, emoji).catch(() => {});
     }
-  };
-
-  // Inject Screenshot Blocked Security Event Pill
-  const triggerScreenshotBlockedAlert = () => {
-    audio.play('alert');
-    const contactName = activeContact?.name || 'Peer';
-    const alertMsg: MessageItem = {
-      id: 'sys_' + Date.now(),
-      sender: 'system',
-      type: 'screenshot_alert',
-      text: `🛡️ Screenshot attempt by ${contactName.split(' ')[0]} blocked by Phantom Shield`,
-      seen: false,
-      totalSeconds: 60,
-      remainingSeconds: 60,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    setChats((prev) => ({
-      ...prev,
-      [activeContactId]: [...(prev[activeContactId] || []), alertMsg],
-    }));
-    setScreen('chat');
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
   };
 
   // Hardware MediaRecorder Voice Note Studio
@@ -1695,74 +1677,6 @@ export const App: React.FC = () => {
     };
     reader.readAsDataURL(file);
     e.target.value = '';
-  };
-
-  // Send Selected Secret Ephemeral Photo
-  const handleSendPhoto = (preset = EPHEMERAL_PHOTO_PRESETS[0]) => {
-    const total = getSeconds(timerMode);
-    const newId = 'p_' + Date.now();
-    const newMsg: MessageItem = {
-      id: newId,
-      sender: 'me',
-      type: 'photo',
-      text: 'Secret Ephemeral Photo',
-      caption: customPhotoCaption.trim() || preset.caption,
-      previewUrl: preset.previewUrl,
-      timerMode,
-      totalSeconds: total,
-      remainingSeconds: total,
-      seen: false,
-      shielded: true,
-      reactions: [],
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      disintegrating: false,
-    };
-    audio.play('send');
-    setShowPhotoPicker(false);
-    setCustomPhotoCaption('');
-    setChats((prev) => ({
-      ...prev,
-      [activeContact.id]: [...(prev[activeContact.id] || []), newMsg],
-    }));
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-
-    // Broadcast to Supabase Realtime
-    if (activeContact && !decoyModeActive && activeContact.id !== 'placeholder') {
-      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
-      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
-      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
-      NetworkService.broadcastMessage(
-        normRoomId,
-        {
-          id: newId,
-          roomId: normRoomId,
-          senderId: 'usr_' + cleanMe,
-          senderHandle: cleanMe,
-          senderDisplayName: myHandle,
-          ciphertext: customPhotoCaption.trim() ? `📷 ${customPhotoCaption.trim()}` : '📷 Ephemeral Photo',
-          iv: 'photo',
-          mediaUrl: preset.previewUrl,
-          createdAt: Date.now(),
-          timerSeconds: total,
-          expiresAt: 0,
-          isBurnOnRead: timerMode === 'burn',
-          isHoldToReveal: true,
-          status: 'sent',
-        },
-        activeContact.code,
-        cleanThem
-      ).catch(() => {});
-    }
-  };
-
-  const markMessageSeen = (chatId: string, msgId: string) => {
-    audio.play('tap');
-    setChats((prev) => ({
-      ...prev,
-      [chatId]: (prev[chatId] || []).map((m) =>
-        m.id === msgId ? { ...m, seen: true } : m
-      ),
-    }));
   };
 
   const vaporizeNow = (chatId: string, msgId: string) => {
@@ -2080,7 +1994,6 @@ export const App: React.FC = () => {
       pin: myCode.replace(/\D/g, ''),
     };
     await NetworkService.sendHandshakeRequest(targetProf.handle, myFullProfile);
-    setHandshakeSentToast(true);
     setInAppBanner({
       name: targetProf.displayName || targetProf.handle,
       code: handleToPin(targetProf.handle).slice(0, 6),
@@ -2090,7 +2003,6 @@ export const App: React.FC = () => {
     setConnectCodeInput('');
     setSearchTargetProfile(null);
     setTimeout(() => {
-      setHandshakeSentToast(false);
       setInAppBanner(null);
     }, 4500);
   };
@@ -2197,6 +2109,24 @@ export const App: React.FC = () => {
 
       {/* NATIVE APP CONTAINER (FULL SCREEN MOBILE / SLEEK DESKTOP) */}
       <div className="relative z-10 w-full sm:max-w-[420px] h-[100dvh] sm:h-[880px] sm:max-h-[94vh] bg-[#09090B] sm:rounded-3xl sm:border sm:border-white/10 shadow-[0_25px_90px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden">
+        {/* Realtime In-App Notification Banner */}
+        {inAppBanner && (
+          <div className="absolute top-3 inset-x-3 z-50 p-3 rounded-2xl bg-[#14151B]/95 border border-[#00F5A0]/40 backdrop-blur-2xl shadow-2xl flex items-center gap-2.5 animate-in fade-in slide-in-from-top-2">
+            <div className="w-7 h-7 rounded-full bg-[#00F5A0]/20 flex items-center justify-center shrink-0">
+              <Sparkles className="w-3.5 h-3.5 text-[#00F5A0]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-white truncate">{inAppBanner.name}</p>
+              <p className="text-[11px] text-zinc-300 truncate">{inAppBanner.text}</p>
+            </div>
+            <button
+              onClick={() => setInAppBanner(null)}
+              className="p-1 text-zinc-400 hover:text-white cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
         {/* =========================================================
             VIEW 0: ZERO-LOGIN ONBOARDING & ACCOUNT RESTORE SCREEN
            ========================================================= */}
@@ -2591,8 +2521,20 @@ export const App: React.FC = () => {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search contacts, @handle or 6-digit code..."
-                  className="w-full bg-[#13141B] border border-white/[0.07] rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#00F5A0]/40 transition-colors shadow-inner"
+                  className="w-full bg-[#13141B] border border-white/[0.07] rounded-2xl pl-10 pr-9 py-2.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-[#00F5A0]/40 transition-colors shadow-inner"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setSearchUserResult(null);
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2663,32 +2605,57 @@ export const App: React.FC = () => {
 
             {/* Conversation List */}
             <div className="flex-1 overflow-y-auto px-3 space-y-1 relative pb-24">
-              {/* Network Discovery: Connect with PIN or Handle directly from search bar */}
-              {searchQuery.trim().length >= 3 && (
-                <div className="p-3.5 my-2 rounded-2xl bg-[#14151B] border border-[#00F5A0]/40 shadow-xl flex items-center justify-between gap-3 animate-in fade-in">
+              {/* Searching Indicator */}
+              {isSearchingUser && (
+                <div className="flex items-center gap-2 px-3 py-2 my-1 text-xs text-emerald-400/90 animate-in fade-in">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#00F5A0]" />
+                  <span>Checking stealth directory for peer...</span>
+                </div>
+              )}
+
+              {/* Verified Real User Found Card */}
+              {searchUserResult && (
+                <div className="p-3.5 my-2 rounded-2xl bg-gradient-to-r from-emerald-950/50 to-[#12141C] border border-[#00F5A0]/50 shadow-xl flex items-center justify-between gap-3 animate-in fade-in">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-full bg-[#00F5A0]/15 border border-[#00F5A0]/40 flex items-center justify-center shrink-0 text-[#00F5A0]">
-                      <Sparkles className="w-5 h-5" />
-                    </div>
+                    <Avatar
+                      avatarId={searchUserResult.avatarId || 1}
+                      size="md"
+                      name={searchUserResult.displayName || searchUserResult.handle}
+                    />
                     <div className="min-w-0">
-                      <div className="text-xs font-bold text-white truncate">
-                        Connect with {searchQuery.startsWith('@') ? searchQuery : (searchQuery.replace(/\D/g, '').length === 6 ? `PIN #${searchQuery.replace(/\D/g, '')}` : `@${searchQuery}`)}
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="text-xs font-bold text-white truncate">
+                          {searchUserResult.displayName || searchUserResult.handle}
+                        </span>
+                        <span className="text-[10px] font-mono text-[#00F5A0] bg-[#00F5A0]/15 px-1.5 py-0.5 rounded font-bold shrink-0">
+                          PIN #{searchUserResult.pin || handleToPin(searchUserResult.handle).slice(0, 6)}
+                        </span>
                       </div>
                       <p className="text-[11px] text-zinc-400 truncate mt-0.5">
-                        Direct zero-login stealth tunnel
+                        @{searchUserResult.handle} • <span className="text-[#00F5A0] font-medium">Verified User 🟢</span>
                       </p>
                     </div>
                   </div>
                   <button
                     onClick={() => {
-                      connectDirectly(searchQuery);
+                      audio.play('receive');
+                      connectDirectly(searchUserResult.handle, searchUserResult.displayName);
                       setSearchQuery('');
+                      setSearchUserResult(null);
                     }}
                     className="px-3.5 py-2 rounded-xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 font-bold text-xs shrink-0 cursor-pointer shadow-md shadow-[#00F5A0]/25 flex items-center gap-1 active:scale-95 transition-all"
                   >
                     <Zap className="w-3.5 h-3.5" />
-                    <span>Connect</span>
+                    <span>Chat</span>
                   </button>
+                </div>
+              )}
+
+              {/* 6-Digit PIN Searched but Not Found */}
+              {searchQuery.replace(/\D/g, '').length === 6 && !isSearchingUser && !searchUserResult && (
+                <div className="px-3.5 py-2.5 my-2 rounded-2xl bg-white/[0.04] border border-white/10 text-xs text-zinc-400 flex items-center gap-2 animate-in fade-in">
+                  <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>No registered peer found with PIN #{searchQuery.replace(/\D/g, '')}</span>
                 </div>
               )}
 
@@ -3126,9 +3093,10 @@ export const App: React.FC = () => {
                 <div className="flex gap-2 pt-1">
                   <button
                     onClick={handlePanicBurn}
-                    className="flex-1 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/30 cursor-pointer active:scale-95 transition-all"
+                    disabled={isBurningAll}
+                    className="flex-1 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-rose-500/30 cursor-pointer active:scale-95 transition-all"
                   >
-                    Burn Now
+                    {isBurningAll ? 'Burning...' : 'Burn Now'}
                   </button>
                   <button
                     onClick={() => setShowPanicPopover(false)}
@@ -3179,11 +3147,6 @@ export const App: React.FC = () => {
                 const isMe = msg.sender === 'me';
                 const isRevealed = !!revealedIds[msg.id];
                 const isBlurred = msg.shielded && !isRevealed;
-                const radius = 9;
-                const circumference = 2 * Math.PI * radius;
-                const dashOffset =
-                  circumference -
-                  (msg.remainingSeconds / Math.max(1, msg.totalSeconds)) * circumference;
 
                 return (
                   <div

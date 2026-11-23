@@ -1,5 +1,5 @@
 import React from 'react';
-import { MessageSquare, Radio, KeyRound, User } from 'lucide-react';
+import { MessageSquare, KeyRound, User } from 'lucide-react';
 import { ActiveTab } from '../types';
 import { sound } from '../services/sound';
 

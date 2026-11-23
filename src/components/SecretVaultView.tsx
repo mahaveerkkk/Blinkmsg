@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Copy, Check, ArrowRight, Camera, Sparkles, UserCheck } from 'lucide-react';
+import { Copy, Check, ArrowRight, Camera, UserCheck } from 'lucide-react';
 import { ChatRoom, UserProfile } from '../types';
 import { sound } from '../services/sound';
 import { supabase, NetworkService, handleToPin } from '../services/network';
