@@ -22,6 +22,12 @@ import { UserProfile } from '../types';
 import { Avatar } from './Avatar';
 import { sound } from '../services/sound';
 import { StorageService } from '../services/storage';
+import {
+  AVATARS_LIST,
+  AVATAR_CATEGORIES,
+  AvatarCategory,
+  getAvatarById,
+} from '../data/avatars';
 
 interface ProfileViewProps {
   currentUser: UserProfile;
@@ -57,6 +63,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [displayName, setDisplayName] = useState(currentUser.displayName || currentUser.handle);
   const [handle, setHandle] = useState(currentUser.handle);
   const [avatarId, setAvatarId] = useState(currentUser.avatarId || 1);
+  const [tempAvatarId, setTempAvatarId] = useState<number>(currentUser.avatarId || 1);
+  const [selectedCategory, setSelectedCategory] = useState<AvatarCategory>('Auras');
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showPinMasked, setShowPinMasked] = useState(true);
@@ -131,7 +139,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       <div className="rounded-3xl bg-[#12131A] border border-white/[0.08] p-5 shadow-2xl mb-4 text-center relative">
         <div
           className="relative inline-block mx-auto mb-3 cursor-pointer group"
-          onClick={() => setShowAvatarModal(true)}
+          onClick={() => {
+            setTempAvatarId(avatarId);
+            setShowAvatarModal(true);
+          }}
         >
           <div className="ring-2 ring-white/10 group-hover:ring-[#00F5A0]/50 rounded-full p-1 transition-all">
             <Avatar avatarId={avatarId} size="xl" name={currentUser.handle} />
@@ -436,42 +447,130 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         )}
       </div>
 
-      {/* Avatar Picker Modal */}
+      {/* 100 Stealth Avatar Picker Modal */}
       {showAvatarModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xl flex items-center justify-center p-4 animate-in fade-in">
-          <div className="w-full max-w-xs bg-[#12131A] border border-white/15 rounded-3xl p-5 shadow-2xl">
-            <h3 className="font-extrabold text-base text-white mb-1 text-center">
-              Choose Stealth Avatar
-            </h3>
-            <p className="text-xs text-zinc-400 mb-4 text-center">
-              Select your persona icon
-            </p>
-
-            <div className="grid grid-cols-4 gap-3 mb-5">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((id) => (
-                <button
-                  key={id}
-                  onClick={() => {
-                    setAvatarId(id);
-                    setShowAvatarModal(false);
-                  }}
-                  className={`p-2 rounded-2xl transition-all cursor-pointer ${
-                    avatarId === id
-                      ? 'bg-[#00F5A0]/20 ring-2 ring-[#00F5A0]'
-                      : 'bg-white/5 hover:bg-white/10'
-                  }`}
-                >
-                  <Avatar avatarId={id} size="md" />
-                </button>
-              ))}
+        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-2xl flex items-center justify-center p-3 animate-in fade-in">
+          <div className="w-full max-w-sm bg-[#12131A] border border-white/15 rounded-3xl p-4 shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 className="font-extrabold text-sm text-white flex items-center gap-1.5">
+                  <span>100 Stealth Avatars</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#00F5A0]/10 text-[#00F5A0] border border-[#00F5A0]/30 font-mono font-bold">
+                    #{tempAvatarId}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-zinc-400">
+                  Select your encrypted persona icon
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAvatarModal(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/15 flex items-center justify-center text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            <button
-              onClick={() => setShowAvatarModal(false)}
-              className="w-full py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold cursor-pointer"
-            >
-              Cancel
-            </button>
+            {/* Currently Active / Previewing Avatar Card */}
+            {(() => {
+              const preview = getAvatarById(tempAvatarId);
+              return (
+                <div className="p-2.5 mb-2.5 rounded-2xl bg-black/60 border border-white/10 flex items-center gap-3">
+                  <Avatar avatarId={tempAvatarId} size="md" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-white truncate">
+                        {preview.name}
+                      </span>
+                      <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-white/10 text-zinc-300">
+                        #{preview.id}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-zinc-400 block mt-0.5 font-medium">
+                      Category: <span className="text-[#00F5A0] font-bold">{preview.category}</span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Category Tabs */}
+            <div className="grid grid-cols-4 gap-1 p-1 bg-black/70 rounded-2xl border border-white/5 mb-2.5">
+              {AVATAR_CATEGORIES.map((cat) => {
+                const isActive = selectedCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => {
+                      sound.vibrate(6);
+                      setSelectedCategory(cat);
+                    }}
+                    className={`py-1 text-[10px] font-bold rounded-xl transition-all cursor-pointer text-center ${
+                      isActive
+                        ? 'bg-[#00F5A0] text-zinc-950 shadow-md shadow-[#00F5A0]/20'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 25-avatar grid per category (5 columns) */}
+            <div className="overflow-y-auto flex-1 pr-1 space-y-2 max-h-64 scrollbar-thin">
+              <div className="grid grid-cols-5 gap-2 pb-2">
+                {AVATARS_LIST.filter((a) => a.category === selectedCategory).map((item) => {
+                  const isSelected = tempAvatarId === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        sound.vibrate(8);
+                        setTempAvatarId(item.id);
+                      }}
+                      className={`relative p-1 rounded-2xl flex flex-col items-center justify-center transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#00F5A0]/20 ring-2 ring-[#00F5A0] scale-105 shadow-lg shadow-[#00F5A0]/20'
+                          : 'bg-white/5 hover:bg-white/10 active:scale-95'
+                      }`}
+                      title={item.name}
+                    >
+                      <Avatar avatarId={item.id} size="sm" />
+                      <span className="text-[9px] font-mono text-zinc-400 mt-1 font-bold">
+                        #{item.id}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="grid grid-cols-2 gap-2 mt-3 pt-2.5 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setShowAvatarModal(false)}
+                className="py-2.5 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  sound.vibrate(12);
+                  sound.playReceive();
+                  setAvatarId(tempAvatarId);
+                  setShowAvatarModal(false);
+                }}
+                className="py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 text-xs font-extrabold shadow-lg shadow-[#00F5A0]/20 active:scale-95 transition-all cursor-pointer"
+              >
+                Use Avatar #{tempAvatarId}
+              </button>
+            </div>
           </div>
         </div>
       )}

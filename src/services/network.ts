@@ -64,6 +64,7 @@ export interface InboxSubscriptionCallbacks {
   onHandshakeAccepted?: (payload: { fromUser: any }) => void;
   onPeerConnected?: (payload: { handle: string; displayName?: string; avatarId?: number }) => void;
   onDeliveryAck?: (payload: { msgId: string; status: 'delivered' | 'read'; roomId?: string }) => void;
+  onScreenshotAlert?: (payload: { handle: string; room?: { id: string } }) => void;
 }
 
 export class NetworkService {
@@ -552,18 +553,50 @@ export class NetworkService {
   /**
    * Broadcast screenshot detection alert
    */
-  static async broadcastScreenshotAlert(roomId: string, handle: string) {
+  static async broadcastScreenshotAlert(roomId: string, handle: string, peerHandle?: string) {
     const normId = normalizeRoomId(roomId);
-    const payload = { handle };
+    const cleanHandle = handle.replace(/^@/, '').toLowerCase().trim();
+    const payload = { handle: cleanHandle, timestamp: Date.now() };
+
+    let targetPeer = peerHandle ? peerHandle.toLowerCase().replace(/^@/, '').trim() : '';
+    if (!targetPeer && normId.startsWith('dm_')) {
+      const parts = normId.replace('dm_', '').split('__');
+      targetPeer = parts[0]?.toLowerCase() === cleanHandle ? parts[1]?.toLowerCase() : parts[0]?.toLowerCase();
+    }
 
     if (supabase) {
-      const ch = activeSupabaseChannels.get(normId);
-      if (ch) {
-        ch.send({
-          type: 'broadcast',
-          event: 'screenshot_alert',
-          payload,
-        }).catch(() => {});
+      // 1. Broadcast to Room Channel
+      try {
+        const ch = await this.getReadyChannel(normId);
+        if (ch) {
+          ch.send({
+            type: 'broadcast',
+            event: 'screenshot_alert',
+            payload,
+          }).catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Screenshot room broadcast failed:', err);
+      }
+
+      // 2. Broadcast directly to peer's private inbox channel
+      if (targetPeer) {
+        try {
+          const inboxName = `inbox_${targetPeer}`;
+          const inboxCh = await this.getReadyChannel(inboxName);
+          if (inboxCh) {
+            inboxCh.send({
+              type: 'broadcast',
+              event: 'screenshot_alert',
+              payload: {
+                ...payload,
+                room: { id: normId },
+              },
+            }).catch(() => {});
+          }
+        } catch (err) {
+          console.warn('Screenshot inbox broadcast failed:', err);
+        }
       }
     }
 
@@ -960,6 +993,12 @@ export class NetworkService {
       ch.on('broadcast', { event: 'delivery_ack' }, ({ payload }) => {
         if (payload && callbacks.onDeliveryAck) {
           callbacks.onDeliveryAck(payload);
+        }
+      });
+
+      ch.on('broadcast', { event: 'screenshot_alert' }, ({ payload }) => {
+        if (payload && callbacks.onScreenshotAlert) {
+          callbacks.onScreenshotAlert(payload);
         }
       });
 

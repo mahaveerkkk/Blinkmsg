@@ -630,7 +630,7 @@ export const App: React.FC = () => {
     NetworkService.syncProfileToSupabase(p).catch(() => {});
   }, [myHandle, myCode, ghostMode]);
 
-  // Realtime Screenshot Detection (Detects PrintScreen & Win/Mac Snip Shortcuts)
+  // Realtime Screenshot Detection (Detects PrintScreen & Win/Mac Snip Shortcuts & Native Android Captures)
   useEffect(() => {
     if (screen !== 'chat' || !activeContact || activeContact.id === 'placeholder') return;
 
@@ -645,12 +645,24 @@ export const App: React.FC = () => {
         const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
         const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
         const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
-        NetworkService.broadcastScreenshotAlert(normRoomId, cleanMe);
+        NetworkService.broadcastScreenshotAlert(normRoomId, cleanMe, cleanThem);
       }
     };
 
+    const handleNativeScreenshot = () => {
+      // Silent Stealth: The taker sees NOTHING, but the peer receives encrypted alert!
+      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
+      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+      NetworkService.broadcastScreenshotAlert(normRoomId, cleanMe, cleanThem);
+    };
+
     window.addEventListener('keyup', handleScreenshotEvent);
-    return () => window.removeEventListener('keyup', handleScreenshotEvent);
+    window.addEventListener('nativeScreenshotTaken', handleNativeScreenshot);
+    return () => {
+      window.removeEventListener('keyup', handleScreenshotEvent);
+      window.removeEventListener('nativeScreenshotTaken', handleNativeScreenshot);
+    };
   }, [screen, activeContact, myHandle]);
 
   // Live Supabase Global Inbox Subscription (Realtime Pushes for Incoming Messages & Handshakes)
@@ -866,6 +878,35 @@ export const App: React.FC = () => {
         });
         audio.play('receive');
       },
+
+      onScreenshotAlert: (payload: any) => {
+        const peerHandleRaw = payload?.handle;
+        if (!peerHandleRaw) return;
+        const peerClean = peerHandleRaw.replace(/^@/, '').toLowerCase().trim();
+        if (peerClean === cleanHandle) return; // Stealth mode: zero feedback for taker!
+
+        audio.play('alert');
+        setScreenshotToast(`🛡️ @${peerClean} attempted to take a screenshot!`);
+        setTimeout(() => setScreenshotToast(null), 5000);
+
+        const contactId = 'c_' + peerClean;
+        const alertMsg: MessageItem = {
+          id: 'sys_' + Date.now(),
+          sender: 'system',
+          type: 'screenshot_alert',
+          text: `🛡️ Screenshot attempt by @${peerClean} detected and blocked by Phantom Shield`,
+          seen: true,
+          totalSeconds: 60,
+          remainingSeconds: 60,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        };
+
+        setChats((prev) => ({
+          ...prev,
+          [contactId]: [...(prev[contactId] || []), alertMsg],
+        }));
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+      },
     });
 
     return () => {
@@ -1039,6 +1080,12 @@ export const App: React.FC = () => {
       },
 
       onScreenshotAlert: (data: { handle: string }) => {
+        const cleanAlertHandle = (data?.handle || '').replace(/^@/, '').toLowerCase().trim();
+        if (cleanAlertHandle === cleanMe) {
+          // Stealth mode: The screenshot taker gets ZERO feedback (no sound, no alert banner)
+          return;
+        }
+
         audio.play('alert');
         const peerHandle = data?.handle
           ? data.handle.startsWith('@')
