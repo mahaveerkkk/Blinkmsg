@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Check,
   Copy,
@@ -73,6 +73,16 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [autoLockEnabled, setAutoLockEnabled] = useState<boolean>(() => {
     return localStorage.getItem('blink_app_lock_enabled') === 'true';
   });
+
+  useEffect(() => {
+    if (currentUser.avatarId) {
+      setAvatarId(currentUser.avatarId);
+      setTempAvatarId(currentUser.avatarId);
+    }
+    if (currentUser.displayName) {
+      setDisplayName(currentUser.displayName);
+    }
+  }, [currentUser.avatarId, currentUser.displayName]);
 
   const toggleAutoLock = () => {
     const next = !autoLockEnabled;
@@ -620,6 +630,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   sound.playReceive();
                   setAvatarId(tempAvatarId);
                   setShowAvatarModal(false);
+                  const cleanHandle = handle.trim().replace(/^@/, '').toLowerCase();
+                  const cleanName = displayName.trim() || cleanHandle;
+                  onSave({
+                    displayName: cleanName,
+                    handle: cleanHandle,
+                    avatarId: tempAvatarId,
+                  });
+                  setSaveSuccess(true);
+                  setTimeout(() => setSaveSuccess(false), 2500);
                 }}
                 className="py-2.5 rounded-2xl bg-[#00F5A0] hover:bg-[#00e090] text-zinc-950 text-xs font-black shadow-lg shadow-[#00F5A0]/20 active:scale-95 transition-all cursor-pointer"
               >

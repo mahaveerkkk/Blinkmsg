@@ -24,16 +24,16 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Hardware-level privacy protection: Blocks screenshot capture & screen recording (captures black screen)
+        // Hardware-level privacy protection: Strictly blocks screenshots & screen recording (black screen / disallowed)
         getWindow().setFlags(
             android.view.WindowManager.LayoutParams.FLAG_SECURE,
             android.view.WindowManager.LayoutParams.FLAG_SECURE
         );
 
-        // Ensure Android OS runtime permission for Camera and Audio are requested on first launch
+        // Ensure Android OS runtime permission for Camera, Audio, and Storage/Media are requested on first launch
         requestRequiredPermissions();
 
-        // Setup real-time silent screenshot detection
+        // Setup real-time screenshot attempt detection
         setupScreenshotDetection();
     }
 
@@ -110,13 +110,29 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void requestRequiredPermissions() {
-        boolean cameraGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean audioGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        java.util.List<String> needed = new java.util.ArrayList<>();
 
-        if (!cameraGranted || !audioGranted) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.CAMERA);
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.RECORD_AUDIO);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
+                needed.add(Manifest.permission.READ_MEDIA_IMAGES);
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                needed.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+            }
+        }
+
+        if (!needed.isEmpty()) {
             ActivityCompat.requestPermissions(
                 this,
-                new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO},
+                needed.toArray(new String[0]),
                 PERMISSION_REQ_CODE
             );
         }

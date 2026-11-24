@@ -358,6 +358,14 @@ export const App: React.FC = () => {
   // Disclaimer Popup on Regenerating Code
   const [showRegenerateDisclaimer, setShowRegenerateDisclaimer] = useState<boolean>(false);
 
+  // Active user profile state (Avatar DP and Display Name)
+  const [myAvatarId, setMyAvatarId] = useState<number>(() => {
+    return StorageService.getProfile()?.avatarId || 1;
+  });
+  const [myDisplayName, setMyDisplayName] = useState<string>(() => {
+    return StorageService.getProfile()?.displayName || '';
+  });
+
   // Full User Profile memoized for Connect & Vault features
   const myFullProfile: UserProfile = useMemo(() => {
     const myClean = myHandle.replace(/^@/, '').toLowerCase();
@@ -365,8 +373,8 @@ export const App: React.FC = () => {
     return {
       id: stored?.id || ('usr_' + myClean),
       handle: myClean,
-      displayName: stored?.displayName || myHandle.replace(/^@/, ''),
-      avatarId: stored?.avatarId || 1,
+      displayName: myDisplayName || stored?.displayName || myHandle.replace(/^@/, ''),
+      avatarId: myAvatarId || stored?.avatarId || 1,
       vibe: stored?.vibe || '⚡ Stealth Tunnel',
       isAvailable: stored?.isAvailable ?? true,
       country: stored?.country || '',
@@ -375,7 +383,7 @@ export const App: React.FC = () => {
       lastActive: Date.now(),
       pin: myCode.replace(/\D/g, '') || handleToPin(myClean),
     };
-  }, [myHandle, myCode]);
+  }, [myHandle, myCode, myAvatarId, myDisplayName]);
 
   // Panic Burn Popover State
   const [showPanicPopover, setShowPanicPopover] = useState<boolean>(false);
@@ -409,6 +417,7 @@ export const App: React.FC = () => {
   const [inAppBanner, setInAppBanner] = useState<{ name: string; code: string; text: string } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
   const sendHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -574,12 +583,13 @@ export const App: React.FC = () => {
   // Sync profile to Supabase
   useEffect(() => {
     const clean = myHandle.replace(/^@/, '');
+    const stored = StorageService.getProfile();
     const p: UserProfile = {
       id: 'usr_' + clean,
       handle: clean,
-      displayName: myHandle,
-      avatarId: 1,
-      vibe: '⚡ Stealth Tunnel',
+      displayName: myDisplayName || stored?.displayName || myHandle,
+      avatarId: myAvatarId || stored?.avatarId || 1,
+      vibe: stored?.vibe || '⚡ Stealth Tunnel',
       isAvailable: !ghostMode,
       country: 'India',
       state: '',
@@ -588,11 +598,45 @@ export const App: React.FC = () => {
       pin: myCode.replace(/\D/g, ''),
     };
     NetworkService.syncProfileToSupabase(p).catch(() => {});
-  }, [myHandle, myCode, ghostMode]);
+  }, [myHandle, myCode, ghostMode, myAvatarId, myDisplayName]);
 
   // Realtime Screenshot Detection (Detects PrintScreen & Win/Mac Snip Shortcuts & Native Android Captures)
   useEffect(() => {
     if (screen !== 'chat' || !activeContact || activeContact.id === 'placeholder') return;
+
+    const triggerScreenshotAlert = () => {
+      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
+      const currentContact = contacts.find((c) => c.id === activeContactIdRef.current) || activeContact;
+      const cleanThem = currentContact.handle.replace(/^@/, '').toLowerCase();
+      if (!cleanThem) return;
+      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+
+      // 1. Broadcast alert packet to peer via room & peer inbox
+      NetworkService.broadcastScreenshotAlert(normRoomId, cleanMe, cleanThem);
+
+      // 2. Play warning sound & show instant toast
+      audio.play('alert');
+      setScreenshotToast(`🛡️ Screenshot attempt blocked! Alert sent to @${cleanThem}`);
+      setTimeout(() => setScreenshotToast(null), 4500);
+
+      // 3. Local pill in taker's chat log so they clearly know the attempt was blocked & dispatched
+      const takerAlertMsg: MessageItem = {
+        id: 'sys_' + Date.now(),
+        sender: 'system',
+        type: 'screenshot_alert',
+        text: `🛡️ Screenshot attempt blocked! Alert sent to @${cleanThem}`,
+        seen: true,
+        totalSeconds: 60,
+        remainingSeconds: 60,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      setChats((prev) => ({
+        ...prev,
+        [currentContact.id]: [...(prev[currentContact.id] || []), takerAlertMsg],
+      }));
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+    };
 
     const handleScreenshotEvent = (e: KeyboardEvent) => {
       const isPrintScreen = e.key === 'PrintScreen';
@@ -601,20 +645,12 @@ export const App: React.FC = () => {
       const isAltPrintScreen = e.altKey && e.key === 'PrintScreen';
 
       if (isPrintScreen || isWinSnip || isMacSnip || isAltPrintScreen) {
-        // Silent Stealth: The taker sees NOTHING, but the peer receives encrypted alert!
-        const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
-        const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
-        const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
-        NetworkService.broadcastScreenshotAlert(normRoomId, cleanMe, cleanThem);
+        triggerScreenshotAlert();
       }
     };
 
     const handleNativeScreenshot = () => {
-      // Silent Stealth: The taker sees NOTHING, but the peer receives encrypted alert!
-      const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
-      const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
-      const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
-      NetworkService.broadcastScreenshotAlert(normRoomId, cleanMe, cleanThem);
+      triggerScreenshotAlert();
     };
 
     window.addEventListener('keyup', handleScreenshotEvent);
@@ -623,7 +659,7 @@ export const App: React.FC = () => {
       window.removeEventListener('keyup', handleScreenshotEvent);
       window.removeEventListener('nativeScreenshotTaken', handleNativeScreenshot);
     };
-  }, [screen, activeContact, myHandle]);
+  }, [screen, activeContact, myHandle, contacts]);
 
   // Live Supabase Global Inbox Subscription (Realtime Pushes for Incoming Messages & Handshakes)
   useEffect(() => {
@@ -721,6 +757,15 @@ export const App: React.FC = () => {
             [contactId]: [...existing, msgItem],
           };
         });
+
+        // Clear remote typing indicator immediately as WhatsApp does!
+        if (isCurrentChat) {
+          setRemoteTyping(false);
+          if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = null;
+          }
+        }
 
         if (!decoyModeActiveRef.current) {
           audio.play('receive');
@@ -1056,6 +1101,13 @@ export const App: React.FC = () => {
         };
 
         audio.play('receive');
+        // Clear remote typing indicator immediately upon incoming message (WhatsApp parity)
+        setRemoteTyping(false);
+        if (typingTimeoutRef.current) {
+          clearTimeout(typingTimeoutRef.current);
+          typingTimeoutRef.current = null;
+        }
+
         setChats((prev) => ({
           ...prev,
           [activeContact.id]: [
@@ -1069,11 +1121,19 @@ export const App: React.FC = () => {
         NetworkService.broadcastDeliveryAck(normRoomId, incomingMsg.id, 'read', cleanThem);
       },
 
-      onTyping: (handle: string) => {
+      onTyping: (handle: string, isTyping?: boolean) => {
         if (handle && handle.toLowerCase() !== cleanMe) {
-          setRemoteTyping(true);
-          if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-          typingTimeoutRef.current = setTimeout(() => setRemoteTyping(false), 2500);
+          if (isTyping === false) {
+            setRemoteTyping(false);
+            if (typingTimeoutRef.current) {
+              clearTimeout(typingTimeoutRef.current);
+              typingTimeoutRef.current = null;
+            }
+          } else {
+            setRemoteTyping(true);
+            if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = setTimeout(() => setRemoteTyping(false), 1800);
+          }
         }
       },
 
@@ -1344,20 +1404,6 @@ export const App: React.FC = () => {
     setScreen('chat');
 
     // Notify partner that request was accepted
-    const myClean = myHandle.replace(/^@/, '').toLowerCase();
-    const myFullProfile: UserProfile = {
-      id: 'usr_' + myClean,
-      handle: myClean,
-      displayName: myHandle.replace(/^@/, ''),
-      avatarId: 1,
-      vibe: '⚡ Stealth Tunnel',
-      isAvailable: true,
-      country: 'India',
-      state: '',
-      city: '',
-      lastActive: Date.now(),
-      pin: myCode.replace(/\D/g, ''),
-    };
     NetworkService.sendHandshakeAccept(cleanReqHandle, myFullProfile).catch(() => {});
   };
 
@@ -1410,13 +1456,20 @@ export const App: React.FC = () => {
     setShowTimerMenu(false);
     setShowSendEffectMenu(false);
     setShieldMode(false);
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    setTypingPulse(0);
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      messageInputRef.current?.focus();
+    }, 30);
 
     // Broadcast to Supabase Realtime with Hardware AES-256-GCM Encryption
     if (activeContact && !decoyModeActive) {
       const cleanMe = myHandle.replace(/^@/, '').toLowerCase();
       const cleanThem = activeContact.handle.replace(/^@/, '').toLowerCase();
       const normRoomId = `dm_${[cleanMe, cleanThem].sort().join('__')}`;
+
+      // Instantly dismiss remote typing indicator for peer
+      NetworkService.broadcastTyping(normRoomId, cleanMe, false);
 
       (async () => {
         let wireCipher = newMsg.text;
@@ -1959,40 +2012,12 @@ export const App: React.FC = () => {
     }).catch(() => {});
 
     // Notify partner over Supabase Realtime
-    const myClean = myHandle.replace(/^@/, '').toLowerCase();
-    const myFullProfile: UserProfile = {
-      id: 'usr_' + myClean,
-      handle: myClean,
-      displayName: myHandle.replace(/^@/, ''),
-      avatarId: 1,
-      vibe: '⚡ Stealth Tunnel',
-      isAvailable: true,
-      country: 'India',
-      state: '',
-      city: '',
-      lastActive: Date.now(),
-      pin: myCode.replace(/\D/g, ''),
-    };
     NetworkService.sendPeerConnectedNotice(cleanPHandle, myFullProfile).catch(() => {});
   };
 
   // Send real-time Handshake Request
   const handleSendHandshake = async (targetProf: UserProfile) => {
     audio.play('tap');
-    const myClean = myHandle.replace(/^@/, '').toLowerCase();
-    const myFullProfile: UserProfile = {
-      id: 'usr_' + myClean,
-      handle: myClean,
-      displayName: myHandle.replace(/^@/, ''),
-      avatarId: 1,
-      vibe: '⚡ Stealth Tunnel',
-      isAvailable: true,
-      country: 'India',
-      state: '',
-      city: '',
-      lastActive: Date.now(),
-      pin: myCode.replace(/\D/g, ''),
-    };
     await NetworkService.sendHandshakeRequest(targetProf.handle, myFullProfile);
     setInAppBanner({
       name: targetProf.displayName || targetProf.handle,
@@ -2828,13 +2853,16 @@ export const App: React.FC = () => {
               }}
               onSave={(updated) => {
                 if (updated.handle) setMyHandle('@' + updated.handle.replace(/^@/, ''));
+                if (updated.avatarId) setMyAvatarId(updated.avatarId);
+                if (updated.displayName) setMyDisplayName(updated.displayName);
                 const clean = (updated.handle || myHandle).replace(/^@/, '').toLowerCase();
                 const cleanName = updated.displayName || clean;
+                const finalAvatarId = updated.avatarId || myAvatarId || 1;
                 const p: UserProfile = {
                   id: myFullProfile.id || ('usr_' + clean),
                   handle: clean,
                   displayName: cleanName,
-                  avatarId: updated.avatarId || myFullProfile.avatarId || 1,
+                  avatarId: finalAvatarId,
                   vibe: myFullProfile.vibe || '⚡ Stealth mode active',
                   isAvailable: !ghostMode,
                   country: 'India',
@@ -3472,7 +3500,11 @@ export const App: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => handleSend(null, 'burn')}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      handleSend(null, 'burn');
+                      messageInputRef.current?.focus();
+                    }}
                     className="w-full px-2.5 py-1.5 rounded-xl hover:bg-rose-500/20 text-left text-xs font-semibold text-rose-300 flex items-center justify-between cursor-pointer"
                   >
                     <span>🔥 Burn on Read</span>
@@ -3480,7 +3512,11 @@ export const App: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleSend(null, 'shield')}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      handleSend(null, 'shield');
+                      messageInputRef.current?.focus();
+                    }}
                     className="w-full px-2.5 py-1.5 rounded-xl hover:bg-[#00F5A0]/20 text-left text-xs font-semibold text-[#00F5A0] flex items-center justify-between cursor-pointer"
                   >
                     <span>🛡️ Fingerprint Shield</span>
@@ -3488,7 +3524,11 @@ export const App: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleSend(null, 'whisper')}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      handleSend(null, 'whisper');
+                      messageInputRef.current?.focus();
+                    }}
                     className="w-full px-2.5 py-1.5 rounded-xl hover:bg-fuchsia-500/20 text-left text-xs font-semibold text-fuchsia-300 flex items-center justify-between cursor-pointer"
                   >
                     <span>⚡ Whisper Surge</span>
@@ -3506,7 +3546,11 @@ export const App: React.FC = () => {
                 }`}
               >
                 <form
-                  onSubmit={(e) => handleSend(e)}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSend(e);
+                    messageInputRef.current?.focus();
+                  }}
                   className="bg-[#121217] rounded-[27px] px-3 py-1.5 flex items-center gap-2 shadow-xl"
                 >
                   {/* Hold-to-Reveal Fingerprint Shield Toggle */}
@@ -3529,6 +3573,7 @@ export const App: React.FC = () => {
                   {/* Text Input OR Live Waveform Voice Studio */}
                   {!isRecording ? (
                     <input
+                      ref={messageInputRef}
                       type="text"
                       value={messageText}
                       onChange={(e) => {
@@ -3657,13 +3702,23 @@ export const App: React.FC = () => {
                           e.preventDefault();
                           setShowSendEffectMenu(true);
                         }}
-                        onMouseDown={() => {
+                        onMouseDown={(e) => {
+                          e.preventDefault(); // Prevents input blur to keep software keyboard active
+                          sendHoldTimerRef.current = setTimeout(() => {
+                            setShowSendEffectMenu(true);
+                            audio.play('tap');
+                          }, 420);
+                        }}
+                        onTouchStart={() => {
                           sendHoldTimerRef.current = setTimeout(() => {
                             setShowSendEffectMenu(true);
                             audio.play('tap');
                           }, 420);
                         }}
                         onMouseUp={() => {
+                          if (sendHoldTimerRef.current) clearTimeout(sendHoldTimerRef.current);
+                        }}
+                        onTouchEnd={() => {
                           if (sendHoldTimerRef.current) clearTimeout(sendHoldTimerRef.current);
                         }}
                         className="w-8 h-8 rounded-full bg-[#00F5A0] hover:bg-[#00e090] text-black flex items-center justify-center shrink-0 shadow-md shadow-[#00F5A0]/40 transition-transform active:scale-90 cursor-pointer"

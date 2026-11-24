@@ -49,7 +49,7 @@ export function handleToPin(handle: string): string {
 
 export interface RoomSubscriptionCallbacks {
   onMessage: (payload: WireMessagePayload | ChatMessage) => void;
-  onTyping?: (userHandle: string) => void;
+  onTyping?: (userHandle: string, isTyping?: boolean) => void;
   onReaction?: (data: { msgId: string; reaction?: string }) => void;
   onBurnReveal?: (data: { msgId: string; expiresAt: number }) => void;
   onTimerChange?: (data: { timerSeconds: number; isBurnOnRead: boolean; setByHandle: string }) => void;
@@ -108,7 +108,7 @@ export class NetworkService {
 
       ch.on('broadcast', { event: 'typing' }, ({ payload }) => {
         if (callbacks.onTyping && payload?.handle) {
-          callbacks.onTyping(payload.handle);
+          callbacks.onTyping(payload.handle, payload.isTyping ?? true);
         }
       });
 
@@ -160,7 +160,7 @@ export class NetworkService {
         const data = event.data;
         if (!data) return;
         if (data.type === 'message') callbacks.onMessage(data.payload);
-        else if (data.type === 'typing' && callbacks.onTyping) callbacks.onTyping(data.handle);
+        else if (data.type === 'typing' && callbacks.onTyping) callbacks.onTyping(data.handle, data.isTyping ?? true);
         else if (data.type === 'reaction' && callbacks.onReaction) callbacks.onReaction(data);
         else if (data.type === 'burn_reveal' && callbacks.onBurnReveal) callbacks.onBurnReveal(data);
         else if (data.type === 'timer_change' && callbacks.onTimerChange) callbacks.onTimerChange(data);
@@ -188,7 +188,7 @@ export class NetworkService {
       if (data.type === 'message') {
         callbacks.onMessage(data.payload);
       } else if (data.type === 'typing' && callbacks.onTyping) {
-        callbacks.onTyping(data.handle);
+        callbacks.onTyping(data.handle, data.isTyping ?? true);
       } else if (data.type === 'reaction' && callbacks.onReaction) {
         callbacks.onReaction({ msgId: data.msgId, reaction: data.reaction });
       } else if (data.type === 'burn_reveal' && callbacks.onBurnReveal) {
@@ -348,15 +348,19 @@ export class NetworkService {
   }
 
   /**
-   * Broadcast typing indicator with 800ms debounce
+   * Broadcast typing indicator with 800ms debounce when typing is active,
+   * or send immediately without delay when typing stops (isTyping = false).
    */
-  static async broadcastTyping(roomId: string, handle: string) {
-    const now = Date.now();
-    if (now - lastTypingTime < 800) {
-      return; // Debounce typing packets
+  static async broadcastTyping(roomId: string, handle: string, isTyping: boolean = true) {
+    if (isTyping) {
+      const now = Date.now();
+      if (now - lastTypingTime < 800) {
+        return; // Debounce typing packets
+      }
+      lastTypingTime = now;
     }
-    lastTypingTime = now;
     const normId = normalizeRoomId(roomId);
+    const cleanHandle = handle.replace(/^@/, '').toLowerCase().trim();
 
     if (supabase) {
       const ch = activeSupabaseChannels.get(normId);
@@ -364,14 +368,14 @@ export class NetworkService {
         ch.send({
           type: 'broadcast',
           event: 'typing',
-          payload: { handle },
+          payload: { handle: cleanHandle, isTyping },
         }).catch(() => {});
       }
     }
 
     try {
       const bc = NetworkService.getBroadcastChannel(normId);
-      bc.postMessage({ type: 'typing', handle });
+      bc.postMessage({ type: 'typing', handle: cleanHandle, isTyping });
     } catch {
       // ignore
     }
